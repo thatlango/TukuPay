@@ -1,27 +1,4 @@
-export type CountryCode =
-  | 'UG'
-  | 'KE'
-  | 'TZ'
-  | 'RW'
-  | 'ZM'
-  | 'MW'
-  | 'GH'
-  | 'CM'
-  | 'CI'
-  | 'BJ'
-  | 'CG'
-  | 'SZ'
-  | 'GN'
-  | 'LR'
-  | 'SS'
-  | 'ZA'
-  | 'NG'
-  | 'CD'
-  | 'GA'
-  | 'TD'
-  | 'NE'
-  | 'MG'
-  | 'SC';
+export type CountryCode = string;
 
 export type ProviderCode = 'mtn' | 'airtel';
 
@@ -41,6 +18,7 @@ export type Money = {
 export type CreatePaymentInput = {
   product: string;
   externalId: string;
+  /** ISO 3166-1 alpha-2 country code, e.g. UG, RW, ZM. */
   country: CountryCode;
   provider?: ProviderCode;
   money: Money;
