@@ -5,6 +5,7 @@ import type {
   ProviderCode,
   ProviderTransaction,
 } from '../domain/payments.js';
+import type { CreatePayoutInput } from '../domain/payouts.js';
 
 export type ProviderContext = {
   country: CountryCode;
@@ -15,6 +16,7 @@ export interface PaymentProviderAdapter {
   readonly provider: ProviderCode;
 
   supports(country: CountryCode): boolean;
+  supportsOperation?(country: CountryCode, operation: 'collection' | 'payout' | 'balance'): boolean;
 
   collect(
     context: ProviderContext,
@@ -29,12 +31,17 @@ export interface PaymentProviderAdapter {
 
   payout?(
     context: ProviderContext,
-    input: {
-      reference: string;
-      amount: string;
-      currency: string;
-      phone: string;
-      description?: string;
-    },
+    input: CreatePayoutInput,
+    providerReference: string,
   ): Promise<ProviderTransaction>;
+
+  getPayoutStatus?(
+    context: ProviderContext,
+    providerReference: string,
+  ): Promise<{ status: PaymentStatus; raw?: unknown }>;
+
+  getBalance?(
+    context: ProviderContext,
+    account: 'collection' | 'disbursement',
+  ): Promise<{ available: string; currency: string; raw?: unknown }>;
 }
