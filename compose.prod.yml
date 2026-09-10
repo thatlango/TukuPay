@@ -1,0 +1,97 @@
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: tukupay-db
+    restart: unless-stopped
+    env_file:
+      - /opt/tuku/secrets/tukupay.env
+    volumes:
+      - tukupay_pgdata:/var/lib/postgresql/data
+    networks:
+      - tukupay_internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 512m
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: tuku/tukupay:local
+    env_file:
+      - /opt/tuku/secrets/tukupay.env
+    command: ["pnpm", "--filter", "@tuku/pay-api", "db:migrate"]
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - tukupay_internal
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  api:
+    image: tuku/tukupay:local
+    container_name: tukupay-api
+    restart: unless-stopped
+    env_file:
+      - /opt/tuku/secrets/tukupay.env
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - tukupay_internal
+      - tuku_edge
+    expose:
+      - "8080"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8080/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 256
+    mem_limit: 384m
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+volumes:
+  tukupay_pgdata:
+    name: tukupay_pgdata
+
+networks:
+  tukupay_internal:
+    name: tukupay-internal
+    internal: true
+  tuku_edge:
+    external: true
+    name: tuku-edge
