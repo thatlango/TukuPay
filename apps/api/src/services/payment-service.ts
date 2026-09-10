@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { getMarket } from '../config/markets.js';
-import { getOperatorCredentials } from '../config/provider-credentials.js';
+import { providerRuntimeMode } from '../config/provider-credentials.js';
 import { db } from '../db/pool.js';
 import type { CreatePaymentInput, PaymentStatus, ProviderCode } from '../domain/payments.js';
 import { TukuPayError } from '../errors.js';
@@ -150,7 +150,7 @@ export class PaymentService {
     }
 
     const adapter = this.router.resolve(country, provider);
-    const credentials = getOperatorCredentials(adapter.provider, country);
+    const runtimeMode = providerRuntimeMode(adapter.provider, country);
     const providerMarket = await db.query<{ id: string }>(
       `SELECT id
          FROM provider_markets
@@ -159,12 +159,12 @@ export class PaymentService {
           AND environment = $3
           AND enabled = TRUE
         LIMIT 1`,
-      [country, adapter.provider, credentials.mode],
+      [country, adapter.provider, runtimeMode],
     );
     const providerMarketId = providerMarket.rows[0]?.id;
     if (!providerMarketId) {
       throw new TukuPayError(
-        `${adapter.provider} ${country} ${credentials.mode} is not activated in TukuPay`,
+        `${adapter.provider} ${country} ${runtimeMode} is not activated in TukuPay`,
         'MARKET_NOT_ACTIVATED',
         503,
       );
@@ -343,12 +343,12 @@ export class PaymentService {
     signature?: string,
   ): Promise<{ eventId: string | null; reference: string | undefined }> {
     const normalizedCountry = country.toUpperCase();
-    const credentials = getOperatorCredentials(provider, normalizedCountry);
+    const runtimeMode = providerRuntimeMode(provider, normalizedCountry);
     const market = await db.query<{ id: string }>(
       `SELECT id FROM provider_markets
         WHERE provider_code = $1 AND country_code = $2 AND environment = $3 AND enabled = TRUE
         LIMIT 1`,
-      [provider, normalizedCountry, credentials.mode],
+      [provider, normalizedCountry, runtimeMode],
     );
     const providerMarketId = market.rows[0]?.id;
     if (!providerMarketId) {
