@@ -1,5 +1,8 @@
 import { getMarket } from '../config/markets.js';
-import { getOperatorCredentials, isOperatorConfigured } from '../config/provider-credentials.js';
+import {
+  getOperatorCredentials,
+  isOperationConfigured,
+} from '../config/provider-credentials.js';
 import type { CountryCode, PaymentStatus, ProviderTransaction } from '../domain/payments.js';
 import { providerMsisdn } from '../utils/msisdn.js';
 import type { PaymentProviderAdapter, ProviderContext } from './types.js';
@@ -24,9 +27,19 @@ export class AirtelMoneyAdapter implements PaymentProviderAdapter {
   readonly provider = 'airtel' as const;
 
   supports(country: CountryCode): boolean {
-    const market = getMarket(country);
-    return market.providers.some((item) => item.provider === 'airtel' && item.enabled)
-      && isOperatorConfigured('airtel', country);
+    return getMarket(country).providers.some((item) => item.provider === 'airtel' && item.enabled)
+      && isOperationConfigured('airtel', country, 'collection');
+  }
+
+  supportsOperation(country: CountryCode, operation: 'collection' | 'payout' | 'balance'): boolean {
+    const listed = getMarket(country).providers.some((item) => item.provider === 'airtel' && item.enabled);
+    if (!listed || !isOperationConfigured('airtel', country, 'collection')) return false;
+    if (operation === 'collection') return true;
+    const credentials = getOperatorCredentials('airtel', country);
+    // Airtel Uganda disbursement stays deliberately disabled until the current
+    // portal contract confirms its signing/encryption requirements and paths.
+    if (operation === 'payout') return false;
+    return Boolean(credentials.airtelBalancePath);
   }
 
   private async token(country: CountryCode): Promise<string> {
@@ -97,8 +110,6 @@ export class AirtelMoneyAdapter implements PaymentProviderAdapter {
       throw new ProviderHttpError('airtel', response.status, JSON.stringify(payload));
     }
 
-    // Collection initiation is asynchronous. Only a transaction-level status is
-    // accepted as final; a generic HTTP/API success acknowledgement is not proof of payment.
     return {
       provider: 'airtel',
       country: context.country,
@@ -130,5 +141,31 @@ export class AirtelMoneyAdapter implements PaymentProviderAdapter {
       throw new ProviderHttpError('airtel', response.status, JSON.stringify(payload));
     }
     return { status: statusFromPayload(payload), raw: payload };
+  }
+
+  async getBalance(
+    context: ProviderContext,
+  ): Promise<{ available: string; currency: string; raw?: unknown }> {
+    const credentials = getOperatorCredentials('airtel', context.country);
+    if (!credentials.airtelBalancePath) {
+      throw new Error(`Airtel balance endpoint is not configured for ${context.country}`);
+    }
+    const token = await this.token(context.country);
+    const response = await fetch(joinUrl(credentials.baseUrl, credentials.airtelBalancePath), {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: '*/*',
+        'X-Country': context.country,
+        'X-Currency': context.currency,
+      },
+    });
+    const payload = await responsePayload(response);
+    if (!response.ok) throw new ProviderHttpError('airtel', response.status, JSON.stringify(payload));
+    const root = payload as { data?: { balance?: unknown }; balance?: unknown; currency?: unknown };
+    return {
+      available: String(root.data?.balance ?? root.balance ?? '0'),
+      currency: String(root.currency ?? context.currency),
+      raw: payload,
+    };
   }
 }
