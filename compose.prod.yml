@@ -32,7 +32,8 @@ services:
     image: tuku/tukupay:local
     env_file:
       - /opt/tuku/secrets/tukupay.env
-    command: ["pnpm", "--filter", "@tuku/pay-api", "db:migrate"]
+    working_dir: /app/apps/api
+    command: ["node", "dist/db/migrate.js"]
     depends_on:
       db:
         condition: service_healthy

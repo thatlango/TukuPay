@@ -26,7 +26,7 @@ docker compose -f compose.prod.yml build
 docker compose -f compose.prod.yml up -d
 ```
 
-The one-shot `migrate` service waits for PostgreSQL, applies unapplied migrations, then exits successfully before the API starts.
+The one-shot `migrate` service waits for PostgreSQL, runs the already-compiled migration program without requiring internet access, then exits successfully before the API starts. The runtime image likewise starts Node directly rather than downloading package-manager tooling at boot.
 
 ## Health
 

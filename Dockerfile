@@ -13,7 +13,6 @@ RUN pnpm --filter @tuku/pay-api build
 FROM node:22-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
-RUN corepack enable
 COPY --from=build /app /app
 EXPOSE 8080
-CMD ["pnpm", "--filter", "@tuku/pay-api", "start"]
+CMD ["node", "apps/api/dist/server.js"]
