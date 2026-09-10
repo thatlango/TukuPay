@@ -19,6 +19,7 @@ export interface PaymentProviderAdapter {
   collect(
     context: ProviderContext,
     input: CreatePaymentInput,
+    providerReference: string,
   ): Promise<ProviderTransaction>;
 
   getStatus(
