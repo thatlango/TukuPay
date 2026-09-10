@@ -11,9 +11,8 @@ function statusFromPayload(payload: unknown): PaymentStatus {
   const root = payload as {
     data?: { transaction?: { status?: unknown } };
     transaction?: { status?: unknown };
-    status?: unknown;
   };
-  const raw = root?.data?.transaction?.status ?? root?.transaction?.status ?? root?.status;
+  const raw = root?.data?.transaction?.status ?? root?.transaction?.status;
   const status = String(raw ?? '').toUpperCase();
   if (['TS', 'SUCCESS', 'SUCCESSFUL', 'COMPLETED'].includes(status)) return 'SUCCESSFUL';
   if (['TF', 'FAILED', 'FAILURE', 'REJECTED'].includes(status)) return 'FAILED';
@@ -98,6 +97,8 @@ export class AirtelMoneyAdapter implements PaymentProviderAdapter {
       throw new ProviderHttpError('airtel', response.status, JSON.stringify(payload));
     }
 
+    // Collection initiation is asynchronous. Only a transaction-level status is
+    // accepted as final; a generic HTTP/API success acknowledgement is not proof of payment.
     return {
       provider: 'airtel',
       country: context.country,

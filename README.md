@@ -1,63 +1,66 @@
 # TukuPay
 
-TukuPay is the shared payment orchestration service for the Tuku estate. It provides one internal API for mobile-money collections, payouts, transaction state, reconciliation, and ledgering while keeping provider credentials out of product applications.
+TukuPay is the direct mobile-money orchestration and ledger service for the Tuku estate. It gives Kela, Units, ImpactOS, ECITAA, LendFlow, Radar, TukuMail and future products one internal payment API while keeping operator-specific logic inside provider adapters.
 
-## Initial scope
+## Current scope
 
-- MTN MoMo collections and payment-status reconciliation
-- Airtel Money provider adapter boundary
-- Unified payment intents and provider transactions
-- PostgreSQL-backed ledger and audit trail
-- Webhook/callback ingestion
-- Service-to-service authentication boundary for Tuku Core
-- Payout/disbursement controls (next phase)
+- Multi-country routing by country + provider + currency + operator account
+- MTN MoMo Collections adapter
+- Airtel Money Collections adapter
+- OAuth/token caching
+- Idempotent payment creation
+- Durable PostgreSQL payment state
+- Webhook ingestion and deduplication
+- Provider-authoritative status verification
+- Automatic reconciliation polling
+- Double-entry collection clearing ledger
+- Service-to-service authentication
+- Docker build and CI
+
+Uganda is the first active market. Other markets are catalogued but remain disabled in the database until operator onboarding and commercial activation are complete.
 
 ## Architecture
 
 ```text
-Tuku products -> TukuPay API -> provider adapters -> MTN MoMo / Airtel Money
-                         |
-                         +-> PostgreSQL ledger + reconciliation workers
+Tuku product backend
+        |
+        v
+     TukuPay
+        |
+   +----+----+
+   |         |
+ MTN MoMo  Airtel Money
+   |         |
+   +----+----+
+        |
+ PostgreSQL ledger
 ```
 
-Products such as Kela, Units, ImpactOS, Radar, ECITAA and others should never embed operator credentials directly. TukuPay owns provider integration and payment state; Tuku Core owns identity and product entitlements.
+Client applications must never call MTN or Airtel directly and must never contain operator credentials or the TukuPay service token.
 
-## Development
-
-Requirements: Node.js 20+, pnpm 9+, Docker.
+## Local setup
 
 ```bash
 cp .env.example .env
 docker compose up -d postgres
+corepack enable
 pnpm install
 pnpm db:migrate
 pnpm dev
 ```
 
-Default local API: `http://localhost:8080`
+Health check:
 
-Health check: `GET /health`
-
-Create payment: `POST /v1/payments`
-
-```json
-{
-  "product": "kela",
-  "externalId": "KELA-ORDER-1001",
-  "provider": "mtn",
-  "amount": 68000,
-  "currency": "UGX",
-  "phone": "25677XXXXXXX",
-  "description": "Kela order payment"
-}
+```bash
+curl http://localhost:8080/health
 ```
 
-## Security
+See `docs/API.md` for the internal API contract and `docs/MULTI_COUNTRY.md` for the market model.
 
-Never commit real provider keys, API users, access tokens, database passwords or Tuku Core service credentials. Production secrets belong in the deployment environment on the VPS.
+## Provider credentials
 
-## Provider notes
+Credentials are namespaced per country, for example `MTN_UG_*`, `AIRTEL_UG_*`, `MTN_RW_*` and `AIRTEL_RW_*`. Secrets belong in the deployment environment only; never commit them to GitHub.
 
-MTN MoMo `RequestToPay` is asynchronous. A successful submission returns HTTP 202, then TukuPay records the payment as pending and resolves the final state through callback and status polling. MTN callbacks are not treated as the sole source of truth; reconciliation polling is mandatory.
+## Production boundary
 
-Airtel endpoints and credentials are deliberately configuration-driven so production integration can be aligned with the exact Uganda application/product credentials issued in the Airtel developer portal.
+TukuPay is initially designed to collect payments for Tuku-owned products and services. Using it to receive or hold funds on behalf of unrelated third-party merchants can create payment-service/aggregator regulatory obligations and must be treated as a separate product and compliance decision.
