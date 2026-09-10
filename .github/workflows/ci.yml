@@ -9,6 +9,27 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: tukupay
+          POSTGRES_PASSWORD: tukupay
+          POSTGRES_DB: tukupay
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tukupay -d tukupay"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://tukupay:tukupay@127.0.0.1:5432/tukupay
+      TUKUPAY_SIMULATOR_ENABLED: "true"
+      TUKUPAY_SERVICE_TOKEN: ci-admin-token-0123456789
+      TUKUPAY_E2E_KELA_TOKEN: ci-kela-token-0123456789
+      TUKUPAY_SERVICE_TOKENS_JSON: '{"kela":{"token":"ci-kela-token-0123456789","scopes":["payments:create","payments:read","payments:refresh"]}}'
+      RECONCILIATION_ENABLED: "false"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -18,3 +39,16 @@ jobs:
       - run: pnpm install --no-frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test
+      - run: pnpm db:migrate
+      - run: pnpm build
+      - name: Start API
+        run: |
+          pnpm --filter @tuku/pay-api start > /tmp/tukupay-api.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:8080/health && exit 0
+            sleep 1
+          done
+          cat /tmp/tukupay-api.log
+          exit 1
+      - name: Simulator end-to-end
+        run: node apps/api/scripts/e2e-simulator.mjs
