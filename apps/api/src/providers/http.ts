@@ -10,7 +10,7 @@ export class ProviderHttpError extends Error {
   }
 
   get retryable(): boolean {
-    return this.status === 408 || this.status === 429 || this.status >= 500;
+    return this.status === 408 || this.status === 409 || this.status === 429 || this.status >= 500;
   }
 }
 
