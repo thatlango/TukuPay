@@ -1,14 +1,29 @@
+import type { PayoutService } from './payout-service.js';
 import type { PaymentService } from './payment-service.js';
 
 export class ReconciliationService {
-  constructor(private readonly payments: PaymentService) {}
+  constructor(
+    private readonly payments: PaymentService,
+    private readonly payouts: PayoutService,
+  ) {}
 
-  async runBatch(limit = 50): Promise<{ checked: number; changed: number; errors: number }> {
-    const ids = await this.payments.pendingPaymentIds(Math.max(1, Math.min(limit, 500)));
+  async runBatch(limit = 50): Promise<{
+    checked: number;
+    changed: number;
+    errors: number;
+    paymentsChecked: number;
+    payoutsChecked: number;
+  }> {
+    const bounded = Math.max(1, Math.min(limit, 500));
+    const [paymentIds, payoutIds] = await Promise.all([
+      this.payments.pendingPaymentIds(bounded),
+      this.payouts.pendingPayoutIds(bounded),
+    ]);
+
     let changed = 0;
     let errors = 0;
 
-    for (const id of ids) {
+    for (const id of paymentIds) {
       try {
         const before = await this.payments.getById(id);
         const after = await this.payments.refresh(id);
@@ -18,7 +33,23 @@ export class ReconciliationService {
       }
     }
 
-    return { checked: ids.length, changed, errors };
+    for (const id of payoutIds) {
+      try {
+        const before = await this.payouts.getById(id);
+        const after = await this.payouts.refresh(id);
+        if (before.status !== after.status) changed += 1;
+      } catch {
+        errors += 1;
+      }
+    }
+
+    return {
+      checked: paymentIds.length + payoutIds.length,
+      changed,
+      errors,
+      paymentsChecked: paymentIds.length,
+      payoutsChecked: payoutIds.length,
+    };
   }
 }
 
