@@ -1,6 +1,7 @@
 import Fastify from 'fastify';
 import {
   isOperationConfigured,
+  providerTransactionCurrency,
   simulatorEnabled,
 } from './config/provider-credentials.js';
 import { MARKETS } from './config/markets.js';
@@ -66,6 +67,7 @@ app.get('/v1/markets', async () => ({
       provider: item.provider,
       supported: item.enabled,
       mode: simulatorEnabled() ? 'simulator' : 'operator',
+      transactionCurrency: providerTransactionCurrency(item.provider, market.country, market.currency),
       collectionsConfigured: item.enabled
         && isOperationConfigured(item.provider, market.country, 'collection'),
       payoutsConfigured: item.enabled

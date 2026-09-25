@@ -4,6 +4,18 @@ import type { CountryCode } from '../domain/payments.js';
 
 export type MsisdnMode = 'e164' | 'local';
 
+export function normalizeSandboxMsisdn(phone: string): string {
+  let digits = phone.trim().replace(/[^0-9+]/g, '');
+  if (digits.startsWith('+')) digits = digits.slice(1);
+  if (digits.startsWith('00')) digits = digits.slice(2);
+  digits = digits.replace(/\D/g, '');
+
+  if (digits.length < 8 || digits.length > 15) {
+    throw new TukuPayError('Invalid mobile money phone number', 'INVALID_PHONE', 400);
+  }
+  return digits;
+}
+
 export function normalizeMsisdn(phone: string, country: CountryCode): string {
   const market = getMarket(country);
   let digits = phone.trim().replace(/[^0-9+]/g, '');

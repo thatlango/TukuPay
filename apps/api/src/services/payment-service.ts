@@ -1,12 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { getMarket } from '../config/markets.js';
-import { providerRuntimeMode } from '../config/provider-credentials.js';
+import { providerRuntimeMode, providerTransactionCurrency, providerUsesOperatorSandbox } from '../config/provider-credentials.js';
 import { db } from '../db/pool.js';
 import type { CreatePaymentInput, PaymentStatus, ProviderCode } from '../domain/payments.js';
 import { TukuPayError } from '../errors.js';
 import { ProviderHttpError } from '../providers/http.js';
 import { majorToMinor, minorToMajor } from '../utils/money.js';
-import { normalizeMsisdn } from '../utils/msisdn.js';
+import { normalizeMsisdn, normalizeSandboxMsisdn } from '../utils/msisdn.js';
 import { ProviderRouter } from './provider-router.js';
 
 type PaymentRow = {
@@ -130,10 +130,19 @@ export class PaymentService {
     const currency = text(input.money?.currency, 'money.currency').toUpperCase();
     const amount = text(input.money?.amount, 'money.amount');
     const market = getMarket(country);
+    const provider = input.provider;
+    if (provider !== undefined && provider !== 'mtn' && provider !== 'airtel') {
+      throw new TukuPayError('provider must be mtn or airtel', 'INVALID_PROVIDER', 400);
+    }
 
-    if (currency !== market.currency) {
+    const adapter = this.router.resolve(country, provider);
+    const runtimeMode = providerRuntimeMode(adapter.provider, country);
+    const operatorSandbox = providerUsesOperatorSandbox(adapter.provider, country);
+    const expectedCurrency = providerTransactionCurrency(adapter.provider, country, market.currency);
+
+    if (currency !== expectedCurrency) {
       throw new TukuPayError(
-        `${country} is configured for ${market.currency}, not ${currency}`,
+        `${adapter.provider} ${country} ${runtimeMode} is configured for ${expectedCurrency}, not ${currency}`,
         'CURRENCY_MISMATCH',
         400,
       );
@@ -143,14 +152,10 @@ export class PaymentService {
     if (existing) return existing;
 
     const amountMinor = majorToMinor(amount, currency);
-    const phone = normalizeMsisdn(text(input.phone, 'phone'), country);
-    const provider = input.provider;
-    if (provider !== undefined && provider !== 'mtn' && provider !== 'airtel') {
-      throw new TukuPayError('provider must be mtn or airtel', 'INVALID_PROVIDER', 400);
-    }
-
-    const adapter = this.router.resolve(country, provider);
-    const runtimeMode = providerRuntimeMode(adapter.provider, country);
+    const rawPhone = text(input.phone, 'phone');
+    const phone = operatorSandbox
+      ? normalizeSandboxMsisdn(rawPhone)
+      : normalizeMsisdn(rawPhone, country);
     const providerMarket = await db.query<{ id: string }>(
       `SELECT id
          FROM provider_markets

@@ -49,6 +49,28 @@ export function simulatorEnabled(): boolean {
   return (process.env.TUKUPAY_SIMULATOR_ENABLED ?? 'false').toLowerCase() === 'true';
 }
 
+export function providerUsesOperatorSandbox(
+  provider: ProviderCode,
+  country: CountryCode,
+): boolean {
+  if (simulatorEnabled() || provider !== 'mtn') return false;
+  const p = prefix(provider, country);
+  const baseUrl = optional(`${p}_BASE_URL`);
+  return Boolean(baseUrl && modeFor(p, baseUrl) === 'sandbox');
+}
+
+export function providerTransactionCurrency(
+  provider: ProviderCode,
+  country: CountryCode,
+  marketCurrency: string,
+): string {
+  const normalizedMarketCurrency = marketCurrency.toUpperCase();
+  if (!providerUsesOperatorSandbox(provider, country)) return normalizedMarketCurrency;
+
+  const p = prefix(provider, country);
+  return (optional(`${p}_SANDBOX_CURRENCY`) ?? 'EUR').toUpperCase();
+}
+
 export function providerRuntimeMode(
   provider: ProviderCode,
   country: CountryCode,
