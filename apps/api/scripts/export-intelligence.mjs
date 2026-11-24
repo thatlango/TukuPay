@@ -18,7 +18,7 @@ try {
     WITH records AS (
       SELECT 'collection' AS kind,pi.country_code AS country,pm.provider_code AS provider,
              pi.currency,pi.status,pi.amount_minor::text,pt.provider_reference AS reference,
-             pi.updated_at AS timestamp,
+             pi.updated_at AS timestamp,pi.created_at,
              CASE WHEN EXISTS(SELECT 1 FROM simulator_transactions sim
                 WHERE sim.provider_code=pm.provider_code AND sim.country_code=pi.country_code
                  AND sim.provider_reference=pt.provider_reference AND sim.kind='collection')
@@ -30,7 +30,7 @@ try {
         WHERE pi.updated_at >= $1
       UNION ALL
       SELECT 'payout',pr.country_code,pm.provider_code,pr.currency,pr.status,pr.amount_minor::text,
-             pt.provider_reference,pr.updated_at,
+             pt.provider_reference,pr.updated_at,pr.created_at,
              CASE WHEN EXISTS(SELECT 1 FROM simulator_transactions sim
                 WHERE sim.provider_code=pm.provider_code AND sim.country_code=pr.country_code
                   AND sim.provider_reference=pt.provider_reference AND sim.kind='payout')

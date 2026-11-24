@@ -9,3 +9,10 @@ coverage/
 pnpm-debug.log*
 
 .pnpm-store/
+
+# Local financial modules and sensitive exports
+**/target/
+**/__pycache__/
+*.pyc
+.venv*/
+financial-snapshots/

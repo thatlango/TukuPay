@@ -83,7 +83,10 @@ def analyze(snapshot):
         if not a:
             flag(key,"UNMATCHED_STATEMENT","high")
             continue
-        row,amount,created = a[0]
+        row,amount,timestamp = a[0]
+        created=instant(row.get("created_at",row["timestamp"]))
+        if created>timestamp:
+            raise ValueError("created_at after observation")
         if row["status"] in {"CREATED","PENDING","APPROVED"} and as_of-created>=timedelta(minutes=30):
             flag(key,"STALE_PENDING","medium")
         if not b:
