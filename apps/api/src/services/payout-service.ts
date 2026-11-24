@@ -352,6 +352,12 @@ export class PayoutService {
     };
     if (payout.description) input.description = payout.description;
 
+    // Mark the durable reservation before the provider call. No replay on ambiguity.
+    const claim = await db.query(
+      "UPDATE financial_dispatch_records SET phase='ATTEMPTING', attempted_at=now() WHERE kind=$1 AND transaction_id=$2 AND provider_reference=$3 AND phase='RESERVED' RETURNING id",
+      ['payout', id, providerReference],
+    );
+    if (claim.rowCount !== 1) return this.getById(id);
     try {
       const transaction = await adapter.payout(
         { country: payout.country, currency: payout.currency },
@@ -498,6 +504,12 @@ export class PayoutService {
         [payoutId, status],
       );
       if (status === 'SUCCESSFUL') await this.ensurePayoutLedger(client, payoutId);
+      if (responsePayload !== null && responsePayload !== undefined) {
+        await client.query(
+          "UPDATE financial_dispatch_records SET phase='OBSERVED', observed_at=now() WHERE kind=$1 AND transaction_id=$2 AND provider_reference=$3 AND phase='ATTEMPTING'",
+          ['payout', payoutId, providerReference],
+        );
+      }
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');

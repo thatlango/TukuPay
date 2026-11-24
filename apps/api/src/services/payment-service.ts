@@ -237,6 +237,12 @@ export class PaymentService {
       client.release();
     }
 
+    // Mark the durable reservation before the provider call. No replay on ambiguity.
+    const claim = await db.query(
+      "UPDATE financial_dispatch_records SET phase='ATTEMPTING', attempted_at=now() WHERE kind=$1 AND transaction_id=$2 AND provider_reference=$3 AND phase='RESERVED' RETURNING id",
+      ['collection', paymentId, providerReference],
+    );
+    if (claim.rowCount !== 1) return this.getById(paymentId);
     try {
       const transaction = await adapter.collect(
         { country, currency },
@@ -478,6 +484,12 @@ export class PaymentService {
         [paymentId, status],
       );
       if (status === 'SUCCESSFUL') await this.ensureCollectionLedger(client, paymentId);
+      if (responsePayload !== null && responsePayload !== undefined) {
+        await client.query(
+          "UPDATE financial_dispatch_records SET phase='OBSERVED', observed_at=now() WHERE kind=$1 AND transaction_id=$2 AND provider_reference=$3 AND phase='ATTEMPTING'",
+          ['collection', paymentId, providerReference],
+        );
+      }
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');
