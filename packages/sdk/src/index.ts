@@ -242,3 +242,13 @@ export class TukuPayClient {
     return result;
   }
 }
+
+export { assertCollectionBinding, assertSuccessfulCollection, TukuPayBindingError } from './estate.js';
+export type { CollectionBinding, EstateEnvironment } from './estate.js';
+import { estateClientOptions, type EstateEnvironment } from './estate.js';
+
+/** One product-specific, server-side client. Disabled by default. */
+export function createEstateClient(product: string, env: EstateEnvironment = process.env): TukuPayClient | null {
+  const options = estateClientOptions(product, env);
+  return options === null ? null : new TukuPayClient(options);
+}
