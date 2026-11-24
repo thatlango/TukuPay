@@ -1,0 +1,33 @@
+# PyMoMo adoption — sprint implementation and gates
+
+Source: https://github.com/wkambale/pymomo/tree/9c9416e584b1e5fe15b27c577f7abdd8eadd4a32 (MIT). Use version 1.3.0 only in an isolated test environment. No upstream source is vendored in this change. Retain upstream copyright and licence if future code is copied. Production runtime remains TypeScript.
+
+## Sprint 1: independent contract tests
+The existing PostgreSQL simulator is retained for business lifecycle tests. The independent PyMoMo HTTP gateway tests actual MTN and Airtel adapter requests, token exchange, status parsing, duplicate MTN references and balances. It does not prove live operator compatibility.
+
+Prerequisites: Node 22, pnpm, Python 3.10+ and reviewed PyMoMo package dependencies. From repository root:
+
+```sh
+pnpm install --no-frozen-lockfile
+pnpm typecheck
+pnpm test
+pnpm build
+python -m venv .venv-pymomo
+.venv-pymomo/bin/python -m pip install -r apps/api/scripts/requirements-pymomo.txt
+.venv-pymomo/bin/python apps/api/scripts/contract-pymomo.py
+```
+
+Run the existing simulator E2E with an isolated PostgreSQL database and simulator credentials as documented in CI. Never run its payout tests against production. Completion: all unit, simulator and contract checks pass; inspect logs for no external operator requests.
+
+## Sprint 2: transport and financial integrity
+Implemented: HTTPS requirement (loopback HTTP for tests), no redirect following, per-attempt timeout, bounded safe-read retries with Retry-After and jitter, response size bounds, atomic collection status and journal writes, deduplicated webhook processing. Financial POST requests are never automatically replayed. Callback contents still never determine settlement.
+Remaining: provider-specific response schema and amount/currency/reference checks; credential-keyed single-flight token renewal and conditional 401 invalidation; structured redacted telemetry; provider-specific signature/replay checks only where the operator contract supports them. Audit existing successful collections with missing or unbalanced journals before release. Validate behavior with failure injection.
+
+## Sprint 3: payout release gates
+Existing MTN payout and approval flow retained; tests now cover approval, repeat approval and reconciliation. Before release: atomically reserve dispatch with stable references; add approval identity separation, product ownership authorization, limits and audit; implement payout ledger accounting and settlement reconciliation with finance approval; test crashes before/after transmission, duplicate requests and conflicting status updates. Airtel payout stays disabled until current Uganda portal contract, encryption/signing, account and settlement arrangements are confirmed. PyMoMo provides a reference implementation but not evidence of operator approval.
+
+## Sprint 4: market expansion
+Candidate provider catalog (not routable): M-Pesa, Paystack, Flutterwave, Wave, Orange Money. Add adapters behind operation-specific capability checks and explicit provider-market activation only after verifying current contracts. Never infer provider solely from MSISDN; do not fail over while original write outcome is uncertain. Begin with M-Pesa Kenya once market scope and commercial account are confirmed. No additional provider or production market is activated by this branch.
+
+## Release decision
+Draft only. No live calls, credentials, activation, deployment or merge. Verify CI and local isolated test evidence, then review security and finance gates before requesting production activation. Existing tests are not evidence of regulatory authorization. Collections on behalf of unrelated third parties and cross-border remittances require separate compliance assessment.
