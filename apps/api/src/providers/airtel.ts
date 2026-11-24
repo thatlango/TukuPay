@@ -1,3 +1,4 @@
+import { validateBalance } from './balance-validation.js';
 import type { TransportScope } from './telemetry.js';
 import { getMarket } from '../config/markets.js';
 import {
@@ -152,10 +153,9 @@ export class AirtelMoneyAdapter implements PaymentProviderAdapter {
     }, 'balance');
     const payload = await responsePayload(response);
     if (!response.ok) throw new ProviderHttpError('airtel', response.status, JSON.stringify(payload));
-    const root = payload as { data?: { balance?: unknown }; balance?: unknown; currency?: unknown };
+    const root = payload as { data?: { balance?: unknown; currency?: unknown }; balance?: unknown; currency?: unknown };
     return {
-      available: String(root.data?.balance ?? root.balance ?? '0'),
-      currency: String(root.currency ?? context.currency),
+      ...validateBalance(root.data?.balance ?? root.balance, root.data?.currency ?? root.currency, context.currency),
       raw: payload,
     };
   }

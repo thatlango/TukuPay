@@ -1,6 +1,7 @@
+import { validateBalance } from '../providers/balance-validation.js';
 import { describeCapabilities } from '../config/provider-capabilities.js';
 import { MARKETS } from '../config/markets.js';
-import { simulatorEnabled } from '../config/provider-credentials.js';
+import { simulatorEnabled, providerTransactionCurrency } from '../config/provider-credentials.js';
 import { db } from '../db/pool.js';
 import type { ProviderCode } from '../domain/payments.js';
 import { ProviderRouter } from './provider-router.js';
@@ -71,10 +72,10 @@ export class OpsService {
            FROM provider_markets ORDER BY country_code,provider_code,environment`,
       ),
       db.query<{ country_code: string; provider_code: ProviderCode; account_type: string; available_major: string; currency: string; simulated: boolean; captured_at: Date }>(
-        `SELECT DISTINCT ON (country_code,provider_code,account_type)
+        `SELECT DISTINCT ON (country_code,provider_code,account_type,currency)
            country_code,provider_code,account_type,available_major,currency,simulated,captured_at
            FROM provider_balance_snapshots
-          ORDER BY country_code,provider_code,account_type,captured_at DESC`,
+          ORDER BY country_code,provider_code,account_type,currency,captured_at DESC`,
       ),
       db.query<{ count: string; gross_minor: string; fee_minor: string }>(
         `SELECT count(*)::text, COALESCE(sum(gross_minor),0)::text AS gross_minor,
@@ -316,10 +317,12 @@ export class OpsService {
     const adapter = this.router.resolveBalance(country.toUpperCase(), provider);
     if (!adapter.getBalance) throw new Error(`${provider} balance operation is unavailable`);
 
+    const expectedCurrency=providerTransactionCurrency(provider,country.toUpperCase(),market.currency);
     const result = await adapter.getBalance(
-      { country: country.toUpperCase(), currency: market.currency },
+      { country: country.toUpperCase(), currency: expectedCurrency },
       account,
     );
+    const verified = validateBalance(result.available,result.currency,expectedCurrency);
     const simulated = simulatorEnabled();
     const saved = await db.query<{ id: string; captured_at: Date }>(
       `INSERT INTO provider_balance_snapshots
@@ -327,7 +330,7 @@ export class OpsService {
        VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)
        RETURNING id,captured_at`,
       [
-        country.toUpperCase(), provider, account, result.available, result.currency,
+        country.toUpperCase(), provider, account, verified.available, verified.currency,
         simulated, JSON.stringify(result.raw ?? null),
       ],
     );
@@ -336,8 +339,8 @@ export class OpsService {
       country: country.toUpperCase(),
       provider,
       account,
-      available: result.available,
-      currency: result.currency,
+      available: verified.available,
+      currency: verified.currency,
       simulated,
       capturedAt: saved.rows[0]!.captured_at,
     };

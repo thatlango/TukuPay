@@ -15,6 +15,7 @@ try:
     # No inherited operator credentials are passed to the child.
     env = {key: os.environ[key] for key in ("PATH", "SYSTEMROOT", "HOME") if key in os.environ}
     env.update({
+        "TUKUPAY_FINANCIAL_ENVIRONMENT": "sandbox",
         "TUKUPAY_SIMULATOR_ENABLED": "false",
         "MTN_UG_BASE_URL": base,
         "MTN_UG_MODE": "sandbox",

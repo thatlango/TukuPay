@@ -1,3 +1,4 @@
+import { validateBalance } from './balance-validation.js';
 import type { TransportScope } from './telemetry.js';
 import { getMarket } from '../config/markets.js';
 import {
@@ -184,8 +185,7 @@ export class MtnMoMoAdapter implements PaymentProviderAdapter {
     if (!response.ok) throw new ProviderHttpError('mtn', response.status, JSON.stringify(payload));
     const data = payload as { availableBalance?: unknown; currency?: unknown };
     return {
-      available: String(data.availableBalance ?? '0'),
-      currency: String(data.currency ?? context.currency),
+      ...validateBalance(data.availableBalance, data.currency, context.currency),
       raw: payload,
     };
   }
