@@ -252,3 +252,6 @@ export function createEstateClient(product: string, env: EstateEnvironment = pro
   const options = estateClientOptions(product, env);
   return options === null ? null : new TukuPayClient(options);
 }
+
+export { consumeFinancialEventsOnce } from './event-consumer.js';
+export type { DurableEventDisposition, EventConsumerResult } from './event-consumer.js';
