@@ -1,3 +1,4 @@
+import { loadIntelligence } from './intelligence-report.mjs';
 import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { TukuPayClient } from '../packages/sdk/dist/index.js';
@@ -14,7 +15,7 @@ const esc = v => String(v ?? '—').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'
 const rows = (data, keys) => data.map(row => '<tr>' + keys.map(k => '<td>'+esc(row[k])+'</td>').join('') + '</tr>').join('');
 const table = (headers, body) => '<div class="scroll"><table><thead><tr>'+headers.map(h=>'<th>'+esc(h)+'</th>').join('')+'</tr></thead><tbody>'+body+'</tbody></table></div>';
 const section = (title, body) => '<section><h2>'+esc(title)+'</h2>'+body+'</section>';
-function render(summary, capabilities, exceptions, transport, notice) {
+function render(summary, capabilities, exceptions, transport, notice, intelligence) {
   const ops = summary.ops;
   const cards = [
     ['Pending collections', ops.pendingAging?.pending],
@@ -32,11 +33,26 @@ function render(summary, capabilities, exceptions, transport, notice) {
     const form = '<form method="post" action="/review"><input type="hidden" name="csrf" value="'+esc(csrf)+'"><input type="hidden" name="id" value="'+esc(row.id)+'"><input type="hidden" name="kind" value="'+esc(row.kind)+'"><input type="hidden" name="version" value="'+esc(row.review_version)+'"><label>State<select name="state">'+states+'</select></label><label>Assignee<input name="assignedTo" maxlength="100" value="'+esc(row.assigned_to??'')+'"></label><label>Review note<textarea required name="note" maxlength="1000" placeholder="No customer or credential data"></textarea></label><button>Save review</button></form>';
     return '<tr><td>'+esc(row.kind)+'<small>'+esc(row.id)+'</small></td><td>'+esc(row.product_code)+' / '+esc(row.country_code)+' / '+esc(row.provider_code)+'</td><td>'+esc(row.status)+'<small>'+esc(row.reason)+'</small></td><td>'+esc(row.attempts)+'</td><td>'+esc(row.created_at)+'</td><td>'+form+'</td></tr>';
   }).join('');
+  const reportSection = intelligence?.error
+    ? section('Financial intelligence','<p>Report unavailable. Check local file permissions, schema and environment.</p>')
+    : !intelligence ? section('Financial intelligence','<p>No offline analysis report configured.</p>')
+    : section('Financial intelligence — review only',
+        '<p>Snapshot '+esc(intelligence.asOf)+' · '+esc(intelligence.environment)+' · '+(intelligence.stale?'STALE':'Recent')+
+        ' · statement coverage '+(intelligence.statementComplete?'attested complete':'partial or unknown')+
+        '. First 200 rows per table. No financial status changes.</p>'+
+        '<h3>Reconciliation</h3>'+table(['Country','Provider','Currency','Kind','Matched count','Matched minor','Observed difference minor'],rows(intelligence.reconciliation,['country','provider','currency','kind','matched_count','matched_minor','observed_difference_minor']))+
+        '<h3>Review findings ('+esc(intelligence.counts.findings)+')</h3>'+table(['Country','Provider','Currency','Reference','Code','Severity'],rows(intelligence.findings,['country','provider','currency','reference','code','severity']))+
+        '<h3>Treasury funding scenarios</h3>'+table(['Country','Provider','Currency','Disbursement balance','7-day obligations','Scenario gap','Evidence'],rows(intelligence.funding,['country','provider','currency','disbursement_balance_minor','seven_day_obligations_minor','funding_gap_minor','evidence']))+
+        '<h3>Settlement differences</h3>'+table(['Country','Provider','Currency','Reference','Fee difference','Net difference','Status'],rows(intelligence.fees,['country','provider','currency','reference','fee_difference_minor','net_difference_minor','status']))+
+        '<h3>Observed activity</h3>'+table(['Country','Provider','Currency','Kind','Count','Peak 5 min','Unsuccessful'],rows(intelligence.activity,['country','provider','currency','kind','observed_count','peak_five_minute_count','terminal_unsuccessful_count']))+
+        '<h3>Historical payout baseline</h3>'+table(['Country','Provider','Currency','Mean daily payout','7-day baseline'],rows(intelligence.liquidity,['country','provider','currency','mean_daily_payout_minor','seven_day_payout_baseline_minor']))+
+        '<p>All amounts are minor units. Observed differences and scenarios are not certified balances or funding instructions.</p>');
   return '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TukuPay Operations</title><style>body{margin:0;background:#f6f7f8;color:#18232b;font:14px system-ui,sans-serif}main{max-width:1400px;margin:auto;padding:28px}h1{font-size:26px;margin:0 0 8px}h2{font-size:17px}small{display:block;color:#52616b;overflow-wrap:anywhere}header{display:flex;justify-content:space-between;gap:16px;align-items:center}a{color:#18675c}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}article,section{background:white;border:1px solid #dce3e6;border-radius:12px;padding:16px;margin:12px 0}strong{display:block;font-size:28px;margin-top:8px}.scroll{overflow:auto}table{width:100%;border-collapse:collapse;text-align:left}th,td{padding:10px;border-bottom:1px solid #e8ecef;vertical-align:top}th{color:#52616b;font-size:12px}td{max-width:330px}form{display:grid;gap:6px;min-width:200px}label{font-size:12px}input,select,textarea,button{box-sizing:border-box;width:100%;font:inherit;border:1px solid #ccd5db;border-radius:6px;padding:7px}button{background:#145d52;color:white;border:0;cursor:pointer}.notice{padding:12px;background:#eef1f2;border-radius:8px}footer{color:#52616b;font-size:12px}</style><main><header><div><h1>TukuPay Operations</h1><p>'+esc(capabilities.simulator?'SIMULATOR — no real money':'OPERATOR — read and review only')+' · '+esc(ops.generatedAt)+'</p></div><a href="/">Refresh snapshot</a></header>'+(notice?'<p class="notice">'+esc(notice)+'</p>':'')+'<div class="cards">'+cards+'</div>'+
     section('Exception workspace', '<p>Review does not change financial status. An unresolved transaction stays visible after review.</p>'+table(['Transaction','Product / rail','Status / reason','Attempts','Created','Review'],reviewRows||'<tr><td colspan="6">No exceptions returned.</td></tr>'))+
     section('24-hour activity by currency',table(['Kind','Currency','Status','Count','Amount (minor units)'],rows(amounts,['kind','currency','status','count','amount_minor'])))+
     section('Provider capabilities',table(['Country','Rail','Environment','Collection','Payout','Callbacks'],rows(rails,['country','provider','environment','collection','payout','callback'])))+
     section('Provider transport — process-local',table(['Provider','Country','Operation','Requests','HTTP errors','Timeouts','Retries','Average ms'],rows(transport.metrics,['provider','country','operation','requests','httpErrors','timeouts','retries','averageDurationMs'])))+
+    reportSection+
     section('Candidate rails',table(['Provider','Initial market','Stage'],rows(capabilities.candidates,['provider','initialCountry','contractStage'])))+
     '<footer>Local operator workspace. No credential is sent to the browser. Currency amounts are not aggregated across currencies. Availability flags do not establish certification.</footer></main></html>';
 }
@@ -64,7 +80,13 @@ const server = createServer(async (req,res)=>{
     } else if (req.method !== 'GET' || !['/','/?reviewed=1'].includes(req.url)) { res.writeHead(404).end();return; }
     if (req.url === '/?reviewed=1') notice = 'Review saved.';
     const [summary,capabilities,exceptions,transport] = await Promise.all([client.getOpsSummary(),client.getCapabilities(),client.getExceptions(100),client.getProviderTransport()]);
-    res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'}).end(render(summary,capabilities,exceptions,transport,notice));
+    let intelligence=null;
+    if(process.env.TUKUPAY_INTELLIGENCE_REPORT){
+      const env=capabilities.simulator?'simulator':process.env.TUKUPAY_INTELLIGENCE_ENVIRONMENT;
+      try{intelligence=await loadIntelligence(process.env.TUKUPAY_INTELLIGENCE_REPORT,env);}
+      catch{intelligence={error:true};}
+    }
+    res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'}).end(render(summary,capabilities,exceptions,transport,notice,intelligence));
   } catch { res.writeHead(502,{'Content-Type':'text/plain; charset=utf-8'}).end('Unable to load TukuPay operations. Check API connectivity and scoped authorization.'); }
 });
 server.listen(port,'127.0.0.1',()=>console.log('TukuPay local operations: '+origin));
