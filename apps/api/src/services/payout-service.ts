@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { getMarket } from '../config/markets.js';
-import { providerRuntimeMode, providerTransactionCurrency, providerUsesOperatorSandbox } from '../config/provider-credentials.js';
+import { providerRuntimeMode, providerTransactionCurrency, providerUsesOperatorSandbox, simulatorEnabled } from '../config/provider-credentials.js';
 import { db } from '../db/pool.js';
 import type { PaymentStatus, ProviderCode } from '../domain/payments.js';
 import type { CreatePayoutInput, PayoutStatus } from '../domain/payouts.js';
 import { TukuPayError } from '../errors.js';
 import { ProviderHttpError } from '../providers/http.js';
+import { assertSuccessfulSettlement } from '../providers/settlement-validation.js';
 import { majorToMinor, minorToMajor } from '../utils/money.js';
 import { normalizeMsisdn, normalizeSandboxMsisdn } from '../utils/msisdn.js';
 import { ProviderRouter } from './provider-router.js';
@@ -314,7 +315,7 @@ export class PayoutService {
         input,
         providerReference,
       );
-      await this.applyStatus(id, providerReference, transaction.status, transaction.raw, null);
+      await this.applyStatus(id, providerReference, transaction.status === 'SUCCESSFUL' ? 'PENDING' : transaction.status, transaction.raw, null);
     } catch (error) {
       const retryable = !(error instanceof ProviderHttpError) || error.retryable;
       await this.applyStatus(
@@ -341,6 +342,22 @@ export class PayoutService {
       { country: payout.country, currency: payout.currency },
       payout.providerReference,
     );
+    if (status.status === 'SUCCESSFUL') {
+      try {
+        assertSuccessfulSettlement(status.raw, {
+          provider: payout.provider,
+          reference: payout.providerReference,
+          externalId: payout.externalId,
+          amount: payout.amount,
+          currency: payout.currency,
+          simulator: simulatorEnabled(),
+        });
+      } catch (error) {
+        await this.applyStatus(id, payout.providerReference, 'PENDING', status.raw,
+          error instanceof Error ? error.message : 'Settlement verification failed');
+        throw new TukuPayError('Provider settlement could not be verified', 'SETTLEMENT_UNVERIFIED', 502);
+      }
+    }
     await this.applyStatus(id, payout.providerReference, status.status, status.raw, null);
     return this.getById(id);
   }

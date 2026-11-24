@@ -89,12 +89,12 @@ export class SimulatedProviderAdapter implements PaymentProviderAdapter {
     context: ProviderContext,
     providerReference: string,
   ): Promise<{ status: PaymentStatus; raw?: unknown }> {
-    const result = await db.query<{ scenario: SimulatorScenario; polls: number }>(
+    const result = await db.query<{ scenario: SimulatorScenario; polls: number; amount_major: string; currency: string }>(
       `UPDATE simulator_transactions
           SET polls = polls + 1, updated_at = now()
         WHERE provider_code = $1 AND country_code = $2
           AND provider_reference = $3 AND kind = $4
-      RETURNING scenario, polls`,
+      RETURNING scenario, polls, amount_major, currency`,
       [this.provider, context.country, providerReference, kind],
     );
     const row = result.rows[0];
@@ -110,7 +110,7 @@ export class SimulatedProviderAdapter implements PaymentProviderAdapter {
     );
     return {
       status,
-      raw: { simulated: true, scenario: row.scenario, kind, polls: row.polls, status },
+      raw: { simulated: true, scenario: row.scenario, kind, polls: row.polls, status, providerReference, amount: row.amount_major, currency: row.currency },
     };
   }
 

@@ -1,11 +1,12 @@
 import type { PoolClient } from 'pg';
 import { createHash, randomUUID } from 'node:crypto';
 import { getMarket } from '../config/markets.js';
-import { providerRuntimeMode, providerTransactionCurrency, providerUsesOperatorSandbox } from '../config/provider-credentials.js';
+import { providerRuntimeMode, providerTransactionCurrency, providerUsesOperatorSandbox, simulatorEnabled } from '../config/provider-credentials.js';
 import { db } from '../db/pool.js';
 import type { CreatePaymentInput, PaymentStatus, ProviderCode } from '../domain/payments.js';
 import { TukuPayError } from '../errors.js';
 import { ProviderHttpError } from '../providers/http.js';
+import { assertSuccessfulSettlement } from '../providers/settlement-validation.js';
 import { majorToMinor, minorToMajor } from '../utils/money.js';
 import { normalizeMsisdn, normalizeSandboxMsisdn } from '../utils/msisdn.js';
 import { ProviderRouter } from './provider-router.js';
@@ -236,7 +237,7 @@ export class PaymentService {
         normalizedInput,
         providerReference,
       );
-      await this.applyStatus(paymentId, providerReference, transaction.status, transaction.raw, null);
+      await this.applyStatus(paymentId, providerReference, transaction.status === 'SUCCESSFUL' ? 'PENDING' : transaction.status, transaction.raw, null);
     } catch (error) {
       const retryable = !(error instanceof ProviderHttpError) || error.retryable;
       const status: PaymentStatus = retryable ? 'PENDING' : 'FAILED';
@@ -283,9 +284,11 @@ export class PaymentService {
       provider_code: ProviderCode;
       country_code: string;
       currency: string;
+      amount_minor: string;
+      external_id: string;
       normalized_status: PaymentStatus;
     }>(
-      `SELECT pt.provider_reference, pm.provider_code, pi.country_code, pi.currency,
+      `SELECT pt.provider_reference, pm.provider_code, pi.country_code, pi.currency, pi.amount_minor::text, pi.external_id,
               pt.normalized_status
          FROM provider_transactions pt
          JOIN payment_intents pi ON pi.id = pt.payment_intent_id
@@ -304,6 +307,22 @@ export class PaymentService {
       { country: transaction.country_code, currency: transaction.currency },
       transaction.provider_reference,
     );
+    if (status.status === 'SUCCESSFUL') {
+      try {
+        assertSuccessfulSettlement(status.raw, {
+          provider: transaction.provider_code,
+          reference: transaction.provider_reference,
+          externalId: transaction.external_id,
+          amount: minorToMajor(transaction.amount_minor, transaction.currency),
+          currency: transaction.currency,
+          simulator: simulatorEnabled(),
+        });
+      } catch (error) {
+        await this.applyStatus(id, transaction.provider_reference, 'PENDING', status.raw,
+          error instanceof Error ? error.message : 'Settlement verification failed');
+        throw new TukuPayError('Provider settlement could not be verified', 'SETTLEMENT_UNVERIFIED', 502);
+      }
+    }
     await this.applyStatus(id, transaction.provider_reference, status.status, status.raw, null);
     return this.getById(id);
   }
