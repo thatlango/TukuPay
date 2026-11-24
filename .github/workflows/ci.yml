@@ -62,3 +62,28 @@ jobs:
             cat /tmp/tukupay-integrity.txt
             exit 1
           fi
+
+  financial-modules:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Python intelligence
+        run: |
+          python3 -m unittest discover -s python/intelligence -p 'test_*.py' -v
+          python3 python/intelligence/cli.py python/intelligence/fixtures/sample.json
+      - name: Rust financial kernel
+        run: |
+          rustc --version
+          cargo test --manifest-path crates/financial-kernel/Cargo.toml --locked --offline
+          cargo build --manifest-path crates/financial-kernel/Cargo.toml --locked --offline --bin shadow
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm build
+      - name: Financial kernel parity
+        run: node scripts/compare-financial-kernel.mjs crates/financial-kernel/target/debug/shadow
