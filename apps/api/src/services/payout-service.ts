@@ -190,11 +190,11 @@ export class PayoutService {
       );
       const row = current.rows[0];
       if (!row) throw new TukuPayError('Payout not found', 'PAYOUT_NOT_FOUND', 404);
-      if (['SUCCESSFUL', 'PENDING', 'APPROVED'].includes(row.status)) {
+      if (['SUCCESSFUL', 'PENDING'].includes(row.status)) {
         await client.query('COMMIT');
         return this.getById(id);
       }
-      if (row.status !== 'APPROVAL_REQUIRED') {
+      if (row.status !== 'APPROVAL_REQUIRED' && row.status !== 'APPROVED') {
         throw new TukuPayError(
           `Payout cannot be approved from ${row.status}`,
           'INVALID_PAYOUT_STATE',
@@ -202,6 +202,7 @@ export class PayoutService {
         );
       }
 
+      if (row.status === 'APPROVAL_REQUIRED') {
       await client.query(
         `UPDATE payout_requests
             SET status='APPROVED', approved_by=$2, approved_at=now(), updated_at=now()
@@ -218,6 +219,7 @@ export class PayoutService {
          VALUES ($1,'payout.approved','payout',$2,$3::jsonb)`,
         [actor, id, JSON.stringify({ reason: reason ?? null })],
       );
+      }
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');
@@ -250,28 +252,50 @@ export class PayoutService {
     }
 
     const providerReference = randomUUID();
-    await db.query(
-      `INSERT INTO provider_payout_transactions
-        (payout_request_id, provider_market_id, provider_reference, normalized_status,
-         request_payload)
-       VALUES ($1,$2,$3,'PENDING',$4::jsonb)`,
-      [
-        payout.id,
-        providerMarketId,
-        providerReference,
-        JSON.stringify({
-          product: payout.product,
-          externalId: payout.externalId,
-          country: payout.country,
-          provider: payout.provider,
-          money: { amount: payout.amount, currency: payout.currency },
-          phone: payout.phone,
-          description: payout.description,
-          metadata: payout.metadata,
-        }),
-      ],
-    );
-    await db.query(`UPDATE payout_requests SET status='PENDING', updated_at=now() WHERE id=$1`, [id]);
+    // Reserve the only permitted dispatch before any financial network request.
+    // A crash after reservation is ambiguous; reconciliation must investigate the
+    // original reference, never generate a second transfer.
+    const client = await db.connect();
+    let reserved = false;
+    try {
+      await client.query('BEGIN');
+      const claimed = await client.query(
+        "UPDATE payout_requests SET status='PENDING', updated_at=now() WHERE id=$1 AND status='APPROVED' RETURNING id",
+        [id],
+      );
+      if (claimed.rowCount === 1) {
+          await client.query(
+            `INSERT INTO provider_payout_transactions
+              (payout_request_id, provider_market_id, provider_reference, normalized_status,
+               request_payload)
+             VALUES ($1,$2,$3,'PENDING',$4::jsonb)`,
+            [
+              payout.id,
+              providerMarketId,
+              providerReference,
+              JSON.stringify({
+                product: payout.product,
+                externalId: payout.externalId,
+                country: payout.country,
+                provider: payout.provider,
+                money: { amount: payout.amount, currency: payout.currency },
+                phone: payout.phone,
+                description: payout.description,
+                metadata: payout.metadata,
+              }),
+            ],
+          );
+      
+        reserved = true;
+      }
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+    if (!reserved) return this.getById(id);
 
     const input: CreatePayoutInput = {
       product: payout.product,
@@ -348,7 +372,7 @@ export class PayoutService {
       await client.query('BEGIN');
       await client.query(
         `UPDATE provider_payout_transactions
-            SET normalized_status=$3, provider_status=$3,
+            SET normalized_status=CASE WHEN normalized_status='SUCCESSFUL' THEN normalized_status ELSE $3 END, provider_status=$3,
                 response_payload=COALESCE($4::jsonb,response_payload),
                 last_error=$5, attempts=attempts+1, last_checked_at=now(), updated_at=now()
           WHERE payout_request_id=$1 AND provider_reference=$2`,
