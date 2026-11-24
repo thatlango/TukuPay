@@ -20,6 +20,12 @@ test('candidate checkout clients round-trip mock HTTP and fail closed on missing
     else if (path === '/v3/transactions/verify_by_reference?tx_ref=ref-1') payload = { status: 'success', data: { id: 2, tx_ref: 'ref-1', amount: 100, currency: 'KES', status: 'successful' } };
     else if (path === '/v1/checkout/sessions') payload = { id: 'cos-1', wave_launch_url: 'https://example.invalid/wave' };
     else if (path === '/v1/checkout/sessions/cos-1') payload = { id: 'cos-1', transaction_id: 'T_1', client_reference: 'ref-1', amount: '100', currency: 'XOF', checkout_status: 'complete', payment_status: 'succeeded' };
+    else if (path === '/transfer') payload = { status:true,data:{transfer_code:'TRF_1'} };
+    else if (path === '/transfer/verify/ref-1') payload = { status:true,data:{transfer_code:'TRF_1',reference:'ref-1',currency:'KES',amount:10000,status:'success',recipient:{recipient_code:'RCP_fixture'}} };
+    else if (path === '/v3/transfers') payload = { status:'success',data:{id:3} };
+    else if (path === '/v3/transfers/3') payload = { status:'success',data:{id:3,reference:'ref-1',currency:'KES',amount:100,status:'SUCCESSFUL',account_number:'fixture-account',bank_code:'fixture-bank'} };
+    else if (path === '/v1/payout') payload = { id:'pt-1' };
+    else if (path === '/v1/payout/pt-1') payload = { id:'pt-1',client_reference:'ref-1',currency:'XOF',receive_amount:'100',status:'succeeded',mobile:'+221700000000' };
     else if (path === '/mpesa/stkpush/v1/processrequest') payload = { ResponseCode: '0', CheckoutRequestID: 'ws_CO_1' };
     else if (path === '/mpesa/stkpushquery/v1/query') payload = { ResultCode: '0', CheckoutRequestID: 'ws_CO_1' };
     else { res.writeHead(404); res.end(); return; }
@@ -39,6 +45,17 @@ test('candidate checkout clients round-trip mock HTTP and fail closed on missing
       const receipt = await client.initiateCheckout(rail,input);
       assert.equal(receipt.status,'PENDING');
       assert.equal((await client.verifyCheckout(rail,input,receipt.providerId ?? undefined)).status,'SUCCESSFUL');
+    }
+    const payout = { ...intent, operation:'payout' as const };
+    for (const recipient of [
+      {rail:'paystack',recipientCode:'RCP_fixture'},
+      {rail:'flutterwave',accountNumber:'fixture-account',bankCode:'fixture-bank'},
+      {rail:'wave',mobile:'+221700000000'},
+    ] as const) {
+      const input = recipient.rail === 'wave' ? {...payout,currency:'XOF'} : payout;
+      const receipt = await client.initiatePayout(input,recipient);
+      assert.equal(receipt.status,'PENDING');
+      assert.equal((await client.verifyPayout(input,recipient,receipt.providerId ?? undefined)).status,'SUCCESSFUL');
     }
     const stk = await client.initiateMpesa({ ...intent, phone: '254712345678' });
     assert.equal(stk.providerId,'ws_CO_1');

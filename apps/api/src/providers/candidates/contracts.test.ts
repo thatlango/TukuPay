@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { verifyCandidate, candidateReceipt, type CandidateIntent } from './contracts.js';
+import { verifyCandidate, verifyCandidatePayout, candidateReceipt, type CandidateIntent } from './contracts.js';
 
 const intent: CandidateIntent = { reference: 'tuku-1', amount: '100.50', currency: 'KES', operation: 'collection' };
 test('Paystack requires exact minor amount, reference, currency and successful status', () => {
@@ -27,4 +27,13 @@ test('M-Pesa STK result, unconfirmed contracts and payout acknowledgements never
   assert.equal(verifyCandidate('paystack', { ...intent, operation: 'payout' }, {}).status, 'PENDING');
   assert.equal(candidateReceipt(intent, 'id', 'https://example.invalid/checkout').status, 'PENDING');
   assert.throws(() => candidateReceipt(intent, 'id', 'http://example.invalid/checkout'));
+});
+
+test('payout evidence also requires the exact intended recipient', () => {
+  const payout = { ...intent, operation: 'payout' as const };
+  const recipient = { rail: 'paystack' as const, recipientCode: 'RCP_fixture' };
+  const data = { transfer_code: 'TRF_fixture', reference: payout.reference, currency:payout.currency, amount:10050,status:'success',recipient:{recipient_code:'RCP_fixture'} };
+  assert.equal(verifyCandidatePayout(payout,recipient,{status:true,data}).status,'SUCCESSFUL');
+  assert.equal(verifyCandidatePayout(payout,recipient,{status:true,data:{...data,recipient:{recipient_code:'RCP_other'}}}).status,'PENDING');
+  assert.equal(verifyCandidatePayout(payout,recipient,{status:true,data:{...data,amount:10051}}).status,'PENDING');
 });

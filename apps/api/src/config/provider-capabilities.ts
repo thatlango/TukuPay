@@ -6,9 +6,9 @@ import { MARKETS } from './markets.js';
 
 export const CANDIDATE_RAILS = [
   { provider: 'mpesa', initialCountry: 'KE', status: 'planned', contractStage: 'mock-stk-query' },
-  { provider: 'paystack', initialCountry: null, status: 'planned', contractStage: 'mock-checkout' },
-  { provider: 'flutterwave', initialCountry: null, status: 'planned', contractStage: 'mock-checkout' },
-  { provider: 'wave', initialCountry: null, status: 'planned', contractStage: 'mock-checkout' },
+  { provider: 'paystack', initialCountry: null, status: 'planned', contractStage: 'mock-checkout-and-payout' },
+  { provider: 'flutterwave', initialCountry: null, status: 'planned', contractStage: 'mock-checkout-and-payout' },
+  { provider: 'wave', initialCountry: null, status: 'planned', contractStage: 'mock-checkout-and-payout' },
   { provider: 'orange', initialCountry: null, status: 'planned', contractStage: 'merchant-contract-required' },
 ] as const;
 

@@ -1,7 +1,7 @@
 import { Buffer } from 'node:buffer';
 import { providerFetch, responsePayload } from '../http.js';
 import { majorToMinor } from '../../utils/money.js';
-import { asRecord, candidateReceipt, verifyCandidate, type CandidateIntent, type CandidateRail } from './contracts.js';
+import { asRecord, candidateReceipt, verifyCandidate, verifyCandidatePayout, type PayoutRecipient, type CandidateIntent, type CandidateRail } from './contracts.js';
 
 type CheckoutInput = CandidateIntent & { email: string; successUrl: string; errorUrl: string };
 /** Contract-development client only: loopback mocks, synthetic credentials, no runtime registration. */
@@ -12,10 +12,10 @@ export class CandidateContractClient {
     if (this.base.protocol !== 'http:' || this.base.hostname !== '127.0.0.1' || this.base.username || this.base.password
         || this.base.pathname !== '/' || this.base.search || this.base.hash) throw new Error('Candidate contracts require a loopback mock origin');
   }
-  private async request(path: string, body?: unknown) {
+  private async request(path: string, body?: unknown, key?: string) {
     const response = await providerFetch(new URL(path, this.base).toString(), {
       method: body === undefined ? 'GET' : 'POST',
-      headers: { 'Authorization': 'Bearer synthetic-contract-token', 'Content-Type': 'application/json' },
+      headers: { 'Authorization': 'Bearer synthetic-contract-token', 'Content-Type': 'application/json', ...(key ? { 'Idempotency-Key': key } : {}) },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
     if (!response.ok) { await response.body?.cancel(); throw new Error('Candidate contract HTTP ' + response.status); }
@@ -84,9 +84,38 @@ export class CandidateContractClient {
     if (response.CheckoutRequestID !== checkoutId) throw new Error('Daraja checkout ID mismatch');
     return verifyCandidate('mpesa', intent, response);
   }
+  async initiatePayout(intent: CandidateIntent, recipient: PayoutRecipient) {
+    if (intent.operation !== 'payout') throw new Error('Payout operation required');
+    const minor = majorToMinor(intent.amount,intent.currency);
+    if (recipient.rail === 'paystack') {
+      if (!/^RCP_[a-zA-Z0-9]+$/.test(recipient.recipientCode) || minor > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('Invalid mock recipient or amount');
+      const root = await this.request('/transfer',{source:'balance',amount:Number(minor),currency:intent.currency,recipient:recipient.recipientCode,reference:intent.reference,reason:'Contract test'});
+      if (root.status !== true) throw new Error('Transfer not acknowledged');
+      return candidateReceipt(intent,asRecord(root.data).transfer_code,null);
+    }
+    if (recipient.rail === 'flutterwave') {
+      if (!recipient.accountNumber || !recipient.bankCode) throw new Error('Mock beneficiary required');
+      const root = await this.request('/v3/transfers',{account_bank:recipient.bankCode,account_number:recipient.accountNumber,amount:intent.amount,currency:intent.currency,reference:intent.reference,narration:'Contract test'});
+      if (root.status !== 'success') throw new Error('Transfer not acknowledged');
+      return candidateReceipt(intent,asRecord(root.data).id,null);
+    }
+    if (!/^\+[1-9][0-9]{7,14}$/.test(recipient.mobile)) throw new Error('Invalid mock wallet');
+    const root = await this.request('/v1/payout',{currency:intent.currency,receive_amount:intent.amount,mobile:recipient.mobile,client_reference:intent.reference},intent.reference);
+    return candidateReceipt(intent,root.id,null);
+  }
+  async verifyPayout(intent: CandidateIntent, recipient: PayoutRecipient, providerId?: string) {
+    if (intent.operation !== 'payout') throw new Error('Payout operation required');
+    if (recipient.rail === 'paystack') return verifyCandidatePayout(intent,recipient,await this.request('/transfer/verify/'+encodeURIComponent(intent.reference)));
+    if (!providerId) throw new Error('Persisted transfer ID required');
+    const root = await this.request((recipient.rail === 'wave' ? '/v1/payout/' : '/v3/transfers/')+encodeURIComponent(providerId));
+    const row = recipient.rail === 'wave' ? root : asRecord(root.data);
+    if (String(row.id) !== providerId) throw new Error('Transfer ID mismatch');
+    return verifyCandidatePayout(intent,recipient,root);
+  }
+
   // The remaining provider contracts are not callable until the actual merchant API
   // schema, encryption/signing requirements and independent financial evidence are reviewed.
   supports(rail: CandidateRail, operation: CandidateIntent['operation']): boolean {
-    return operation === 'collection' && ['paystack', 'flutterwave', 'wave', 'mpesa'].includes(rail);
+    return ['paystack', 'flutterwave', 'wave'].includes(rail) || (operation === 'collection' && rail === 'mpesa');
   }
 }

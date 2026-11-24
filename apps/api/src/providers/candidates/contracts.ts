@@ -13,11 +13,11 @@ export function asRecord(value: unknown): Record<string, unknown> {
 export function nonempty(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value : null;
 }
-function identifier(value: unknown): string | null {
+export function identifier(value: unknown): string | null {
   if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) return String(value);
   return nonempty(value);
 }
-function moneyMatches(value: unknown, intent: CandidateIntent, minor: boolean): boolean {
+export function moneyMatches(value: unknown, intent: CandidateIntent, minor: boolean): boolean {
   try {
     if (typeof value !== 'string' && typeof value !== 'number') return false;
     if (typeof value === 'number' && (!Number.isFinite(value) || Math.abs(value) > Number.MAX_SAFE_INTEGER)) return false;
@@ -71,4 +71,30 @@ export function candidateReceipt(intent: CandidateIntent, id: unknown, link: unk
     checkoutUrl = url.toString();
   }
   return { reference: intent.reference, providerId: identifier(id), checkoutUrl, status: 'PENDING' };
+}
+
+export type PayoutRecipient =
+  | { rail: 'paystack'; recipientCode: string }
+  | { rail: 'flutterwave'; bankCode: string; accountNumber: string }
+  | { rail: 'wave'; mobile: string };
+
+export function verifyCandidatePayout(intent: CandidateIntent, recipient: PayoutRecipient, payload: unknown): CandidateEvidence {
+  try {
+    if (intent.operation !== 'payout') return evidence('PENDING','OPERATION_MISMATCH');
+    const root = asRecord(payload);
+    const row = recipient.rail === 'wave' ? root : asRecord(root.data);
+    const id = identifier(recipient.rail === 'paystack' ? row.transfer_code : row.id);
+    const reference = recipient.rail === 'wave' ? row.client_reference : row.reference;
+    const matchedRecipient = recipient.rail === 'wave' ? row.mobile === recipient.mobile
+      : recipient.rail === 'flutterwave' ? row.account_number === recipient.accountNumber && row.bank_code === recipient.bankCode
+      : typeof row.recipient === 'object' && row.recipient !== null && asRecord(row.recipient).recipient_code === recipient.recipientCode;
+    const confirmed = recipient.rail === 'wave' ? row.status === 'succeeded'
+      : recipient.rail === 'flutterwave' ? root.status === 'success' && row.status === 'SUCCESSFUL'
+      : root.status === true && row.status === 'success';
+    if (!confirmed || !matchedRecipient || reference !== intent.reference || row.currency !== intent.currency || !id ||
+        !moneyMatches(recipient.rail === 'wave' ? row.receive_amount : row.amount, intent, recipient.rail === 'paystack')) {
+      return evidence('PENDING','PAYOUT_EVIDENCE_INCOMPLETE',id);
+    }
+    return evidence('SUCCESSFUL','MATCHED_PAYOUT_EVIDENCE',id);
+  } catch { return evidence('PENDING','MALFORMED_RESPONSE'); }
 }
