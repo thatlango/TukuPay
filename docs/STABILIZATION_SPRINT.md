@@ -71,3 +71,31 @@ Candidate commits eba9229ca806fb702ffc41b36da8d5a2a7da22c0 and b9363c91f343bcbcc
   - utils/create-intent.ts cad784b4f003b7d4dba88272437ed2c0d08a7d77
   - utils/create-intent.test.ts 98b30bad2f2dfda5632b3c46ee7e857296d64702
 - Full API build, HTTP integration, actual timer operation, PostgreSQL and consumer compatibility remain unverified. No live requests or deployment. STAB-05 and STAB-06 remain open.
+
+## Remaining executable backlog — final implementation slice
+
+All seven named areas have code changes. This is not closure of the original STAB issues or release gates.
+
+| Area | Candidate changes | Verification boundary |
+|---|---|---|
+| Credential configuration | Endpoint schemes, userinfo/query/fragment rejection, mode consistency, MTN market target, MSISDN enum, Airtel v1 and path checks; configured status now checks credential configuration | Pure settings tests passed. Actual credential loading, operator contract and market endpoints still require integration tests. |
+| Sensitive-data protection | Request logging disabled, redaction paths configured, generic failure log events and persisted error labels | Source inspection only; Fastify/Pino runtime capture, historical data and raw provider payload retention remain open. |
+| Phone validation | Explicit international country mismatch and invalid characters rejected; sandbox fixtures preserved | Four tests passed using Uganda dial-code test double, not full national numbering validation or beneficiary verification. |
+| Provider capabilities | Expose collection/disbursement balance configuration and availability separately, block unsupported Airtel operator disbursement balance | Two tests passed for account capability helper. Database activation and adapter integration still unverified. |
+| SDK | Runtime validation of operational responses, recovery retrieval, event acknowledgement, non-posting settlement proposal/review contracts | All eight validator tests passed; full isolated SDK strict compilation and four mocked client checks passed. HTTP/API integration and product adoption pending. |
+| Integrity checks | Read-only repeatable-read audit expanded to financial events, dispatch, evidence, journal and settlement review consistency | SQL not executed; PostgreSQL unavailable. |
+| Rust/TypeScript consistency | Shared 64-character money input boundary and two additional vectors | TypeScript passed all 17 shared money vectors; Rust not compiled or tested. |
+
+Implementation commits: 6a4f215d4ef618a4846e45681d8e577d3beebefd, d596d55392c1aeecb21da1897dae8dcc75d23d50, f43dd6148274109385368af258d9ff16beb5f2a7, 37277ae085f621067d039f8aa3fc3c087b5347f3, 66f8bb380fbc146e020578354dee95ffe0558327, 8d54e80f35792ed1e6f4bc351251841fcbd7e457, a7a34aca0055f49af35e007f89559aceac96bb36.
+
+Executed in isolated reconstructed source layout, Node 22.16.0, strict ES2022/NodeNext TypeScript compilation with noUncheckedIndexedAccess and exactOptionalPropertyTypes. Final test groups: 3 settings + 4 phone + 2 account capability + 8 SDK = 17 passed, zero failed. The phone module imports an isolated Uganda dial-code test double. Tested source blob hashes match repository blobs:
+- provider-settings.ts b4b48decedafbb0add72200f41d493ebc4190f27; test d80d7601b4472c257dbdfc87f879a7383b1298d4
+- msisdn.ts 5c4076f4e6c07ee99af263c94933275c2ae313f7; test 450efee82b78bf4d7375bbda688bcf1a5ee9c2a0
+- balance-accounts.ts 5a2077eadba86d9101c64c95facc9b605d80473f; test af64df2b4be519fca3d3eca9bd3de61b60a5f63a
+- SDK response.ts 81215631b03bfbd1dd24bb3668c30b4edd1fc45f; test 52a25d99bbd88bf6363e1da0d106ac5e2d3dd343
+- SDK ops-response.ts c5bcc0819500857dff9fd5d6867b3fcdf2534765; test a1975879b75ad5baf814ecaf0f64f82fe0b0f45d
+- SDK settlement-response.ts 0a86a731e7b0be78d2c9a860692ffb1d77905cdb; test 800224abb685f03dea09ddade359ac2272703c17
+- SDK index.ts 9f53b4d9e299d0789865019f1e5c84be3c6cd1d9. Complete SDK source and declaration compile in isolated layout, with 4 mocked fetch checks (event retrieval, successful acknowledgement, invalid acknowledgement rejection, recovery retrieval).
+- money.ts 529edb4e8b5aab905b6b22d4087d14ff907bb05d; money.tsv 87231241fb3d9e5775d5f2536cf2c0ed271945d2. All 17 shared vectors executed in TypeScript with exact integer assertions.
+
+No operator, external payment endpoint, database, or production server was accessed. No live credential used. No full API integration, Rust compilation or SQL execution. SDK settlement decisions remain non-posting; matching response shapes is not financial evidence. All release gates remain open. Existing deployments must review strict settings and API compatibility before upgrading. See SDK_INTEGRATION.md for the updated contract.
