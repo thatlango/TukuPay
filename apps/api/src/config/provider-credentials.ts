@@ -1,3 +1,4 @@
+import { providerUrl, providerMode, msisdnMode as parseMsisdnMode, airtelVersion, operatorPath } from './provider-settings.js';
 import { configuredEnvironment, verifyOperatorMode } from './financial-environment.js';
 import type { CountryCode, ProviderCode } from '../domain/payments.js';
 import type { MsisdnMode } from '../utils/msisdn.js';
@@ -40,10 +41,7 @@ function optional(name: string): string | undefined {
 }
 
 function modeFor(name: string, baseUrl: string): 'sandbox' | 'production' {
-  const configured = optional(`${name}_MODE`);
-  if (configured === 'production') return 'production';
-  if (configured === 'sandbox') return 'sandbox';
-  return /sandbox|uat/i.test(baseUrl) ? 'sandbox' : 'production';
+  return providerMode(optional(name+'_MODE'),baseUrl);
 }
 
 export function simulatorEnabled(): boolean {
@@ -100,7 +98,8 @@ export function isOperationConfigured(
       ? [`${p}_DISBURSEMENT_PATH`, `${p}_DISBURSEMENT_STATUS_PATH`]
       : [];
 
-  return [...common, ...operationSpecific].every((name) => Boolean(process.env[name]?.trim()));
+  if (![...common,...operationSpecific].every(name=>Boolean(process.env[name]?.trim()))) return false;
+  try { getOperatorCredentials(provider,country); return true; } catch { return false; }
 }
 
 export function isOperatorConfigured(provider: ProviderCode, country: CountryCode): boolean {
@@ -112,17 +111,18 @@ export function getOperatorCredentials(
   country: CountryCode,
 ): OperatorCredentials {
   const p = prefix(provider, country);
-  const baseUrl = required(`${p}_BASE_URL`).replace(/\/$/, '');
-  const mode = modeFor(p, baseUrl);
+  const rawUrl = required(`${p}_BASE_URL`);
+  const mode = modeFor(p, rawUrl);
+  const baseUrl = providerUrl(rawUrl,mode,`${p}_BASE_URL`);
   verifyOperatorMode(configuredEnvironment(), mode);
-  const msisdnMode = optional(`${p}_MSISDN_MODE`) === 'e164' ? 'e164' : 'local';
+  const msisdnMode = parseMsisdnMode(optional(`${p}_MSISDN_MODE`),provider==='mtn'?'e164':'local');
 
   if (provider === 'mtn') {
     return {
       provider,
       country,
       baseUrl,
-      callbackUrl: required(`${p}_CALLBACK_URL`).replace(/\/$/, ''),
+      callbackUrl: providerUrl(required(`${p}_CALLBACK_URL`),mode,`${p}_CALLBACK_URL`),
       mode,
       targetEnvironment: required(`${p}_TARGET_ENVIRONMENT`),
       subscriptionKey: optional(`${p}_COLLECTION_SUBSCRIPTION_KEY`),
@@ -132,19 +132,19 @@ export function getOperatorCredentials(
       clientId: undefined,
       clientSecret: undefined,
       apiVersion: 1,
-      msisdnMode: optional(`${p}_MSISDN_MODE`) === 'local' ? 'local' : 'e164',
+      msisdnMode,
       airtelDisbursementPath: undefined,
       airtelDisbursementStatusPath: undefined,
       airtelBalancePath: undefined,
     };
   }
 
-  const version = Number(optional(`${p}_API_VERSION`) ?? '1');
+  const version = airtelVersion(optional(`${p}_API_VERSION`));
   return {
     provider,
     country,
     baseUrl,
-    callbackUrl: required(`${p}_CALLBACK_URL`).replace(/\/$/, ''),
+    callbackUrl: providerUrl(required(`${p}_CALLBACK_URL`),mode,`${p}_CALLBACK_URL`),
     mode,
     targetEnvironment: optional(`${p}_TARGET_ENVIRONMENT`),
     subscriptionKey: undefined,
@@ -153,10 +153,10 @@ export function getOperatorCredentials(
     apiKey: undefined,
     clientId: required(`${p}_CLIENT_ID`),
     clientSecret: required(`${p}_CLIENT_SECRET`),
-    apiVersion: Number.isFinite(version) && version >= 1 ? version : 1,
+    apiVersion: version,
     msisdnMode,
-    airtelDisbursementPath: optional(`${p}_DISBURSEMENT_PATH`),
-    airtelDisbursementStatusPath: optional(`${p}_DISBURSEMENT_STATUS_PATH`),
-    airtelBalancePath: optional(`${p}_BALANCE_PATH`),
+    airtelDisbursementPath: operatorPath(optional(`${p}_DISBURSEMENT_PATH`)),
+    airtelDisbursementStatusPath: operatorPath(optional(`${p}_DISBURSEMENT_STATUS_PATH`)),
+    airtelBalancePath: operatorPath(optional(`${p}_BALANCE_PATH`)),
   };
 }

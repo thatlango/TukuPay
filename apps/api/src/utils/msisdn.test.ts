@@ -13,3 +13,10 @@ test('can format E164 digits as provider-local MSISDN', () => {
 test('keeps MTN sandbox fixture numbers unscoped', () => {
   assert.equal(normalizeSandboxMsisdn('46733123453'), '46733123453');
 });
+
+test('explicit international numbers must match requested market',()=>{
+  assert.equal(normalizeMsisdn('+256 772 123456','UG'),'256772123456');
+  assert.equal(normalizeMsisdn('00256772123456','UG'),'256772123456');
+  for(const phone of ['+254722123456','00254722123456','+2560772123456','0772abc123456','0772+123456','0772.123456'])assert.throws(()=>normalizeMsisdn(phone,'UG'),{code:'INVALID_PHONE'});
+  assert.throws(()=>normalizeSandboxMsisdn('abc46733123453'));
+});

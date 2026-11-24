@@ -70,7 +70,7 @@ export function startReconciliationWorker(
       const result = await reconciler.runBatch(batchSize);
       if (result.checked > 0) logger.info(result, 'TukuPay reconciliation batch completed');
     } catch (error) {
-      logger.error({ err: error }, 'TukuPay reconciliation batch failed');
+      logger.error({ event: 'reconciliation_failed' }, 'TukuPay reconciliation batch failed');
     } finally {
       running = false;
     }
