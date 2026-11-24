@@ -1,3 +1,4 @@
+import { registerFinancialEventRoutes } from './routes/financial-events.js';
 import { configuredEnvironment, verifyBinding } from './config/financial-environment.js';
 import Fastify from 'fastify';
 import {
@@ -88,6 +89,7 @@ app.get('/v1/markets', async () => ({
 }));
 
 await registerPaymentRoutes(app, payments);
+await registerFinancialEventRoutes(app);
 await registerPayoutRoutes(app, payouts);
 await registerWebhookRoutes(app, payments);
 await registerOpsRoutes(app, ops, settlements);

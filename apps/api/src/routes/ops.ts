@@ -1,3 +1,4 @@
+import { db } from '../db/pool.js';
 import { parseReview, recordExceptionReview } from '../services/exception-review.js';
 import { transportMetrics } from '../providers/telemetry.js';
 import type { FastifyInstance } from 'fastify';
@@ -41,6 +42,18 @@ export async function registerOpsRoutes(
     const country = typeof body.country === 'string' ? body.country.toUpperCase() : '';
     const account = body.account === 'disbursement' ? 'disbursement' : 'collection';
     return { balance: await ops.captureBalance(body.provider as ProviderCode, country, account) };
+  });
+
+  app.get('/v1/ops/dispatch-recovery', {preHandler:requireScopes('ops:read')},async()=>{
+    const result=await db.query(
+      `SELECT kind,transaction_id,phase,created_at,attempted_at,observed_at
+        FROM financial_dispatch_records WHERE phase IN ('RESERVED','ATTEMPTING')
+        ORDER BY created_at LIMIT 100`);
+    return {records:result.rows,policy:'Review only; no automatic resubmission'};
+  });
+  app.post('/v1/ops/settlements/:id/review',{preHandler:requireScopes('settlements:review')},async request=>{
+    const {id}=request.params as {id:string};
+    return {settlement:await settlements.review(id,request.body,identifyService(request)?.service??'unknown')};
   });
 
   app.post('/v1/ops/settlements', { preHandler: requireScopes('settlements:write') }, async (request) => {
