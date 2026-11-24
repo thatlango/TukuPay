@@ -4,7 +4,9 @@ import json
 import csv
 import hashlib
 from pathlib import Path
-from intelligence import analyze
+from intelligence import analyze, instant
+from treasury import treasury_report
+from risk import activity_indicators
 from statements import load_statement_csv
 
 def main():
@@ -36,6 +38,8 @@ def main():
                 provenance={"format":"normalized-json-v1","sha256":hashlib.sha256(statement_raw).hexdigest()}
             data["statement_coverage_complete"]=args.complete_statements
         result=analyze(data)
+        result['treasury']=treasury_report(data.get('treasury'),instant(data['as_of']))
+        result['activity_indicators']=activity_indicators(data)
         result["provenance"]={"snapshot_sha256":hashlib.sha256(raw).hexdigest(),"independent_statement":provenance}
     except (OSError,ValueError,KeyError,TypeError,OverflowError,csv.Error) as exc:
         parser.exit(2,"Invalid snapshot ("+type(exc).__name__+"). Check schema and input.\n")
