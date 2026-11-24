@@ -1,0 +1,12 @@
+currency	major	result	minor	canonical
+UGX	1500	ok	1500	1500
+KES	100.50	ok	10050	100.5
+USD	0.01	ok	1	0.01
+XOF	1000	ok	1000	1000
+EUR	1.20	ok	120	1.2
+UGX	0	error	-	-
+UGX	1.0	error	-	-
+KES	1.001	error	-	-
+KES	-1	error	-	-
+KES	1e3	error	-	-
+UGX	9223372036854775807	ok	9223372036854775807	9223372036854775807
