@@ -40,3 +40,6 @@ Both test suites ran in an isolated temporary reconstruction of those exact file
 
 ## Exit criteria
 Every issue has implementation and acceptance evidence, all release gates closed, full integration and security tests pass, legacy upgrade and rollback rehearsed, finance/security reviewers approve. Current session does not meet these criteria.
+
+## Expanded offline verification
+At candidate 860e225ee66a0fff5135e99600f70c79dad8680a all five Python test modules ran together: 29 tests passed in 0.018s, zero failures (includes the ten intelligence tests above; not additive). All eleven source/test files and both fixtures matched repository Git blob hashes before execution. Command: python3 -m unittest discover -s . -p 'test_*.py' -v in isolated reconstructed module directory. CLI fixture and batch CLI fixture both passed with one matched successful record and HUMAN_REVIEW_ONLY decision. CLI blob hash 75ffa75b0ea2eb7d045123ad76b0415a8cfd1e9e matched repository. Total unique unit groups: 29 Python + 3 Node = 32. Two offline CLI smoke checks also passed. No provider or database access, full build or release gate closure.
