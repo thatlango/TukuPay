@@ -1,3 +1,5 @@
+import { validProposal,validSettlementReview,type SettlementProposalInput,type SettlementProposal,type SettlementReviewInput,type SettlementReview } from './settlement-response.js';
+export type { SettlementProposalInput,SettlementProposal,SettlementReviewInput,SettlementReview } from './settlement-response.js';
 import { validCapabilities,validExceptions,validRecovery,validTransport,validOpsSummary,validReview,type DispatchRecovery } from './ops-response.js';
 export type { DispatchRecovery } from './ops-response.js';
 import { validEventBatch, validTransaction, type FinancialEvent } from './response.js';
@@ -194,6 +196,19 @@ export class TukuPayClient {
     const result=await this.request<{id:string;acknowledged:true}>('POST','/v1/products/'+encodeURIComponent(this.product)+'/financial-events/'+encodeURIComponent(id.toLowerCase())+'/ack');
     if(result.id!==id.toLowerCase() || result.acknowledged!==true)throw new TukuPayApiError(502,'INVALID_RESPONSE','Invalid event acknowledgement response');
     return result;
+  }
+  /** Submits a proposal only; no posting or movement of money. */
+  async proposeSettlement(input:SettlementProposalInput): Promise<SettlementProposal> {
+    const result=await this.request<{settlement:unknown}>('POST','/v1/ops/settlements',input);
+    if(!validProposal(result.settlement,input))throw new TukuPayApiError(502,'INVALID_RESPONSE','Invalid settlement proposal response');
+    return result.settlement;
+  }
+  /** Records the existing review-only decision; cannot authorize ledger posting. */
+  async reviewSettlement(id:string,input:SettlementReviewInput): Promise<SettlementReview> {
+    if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id))throw new Error('Invalid settlement ID');
+    const result=await this.request<{settlement:unknown}>('POST','/v1/ops/settlements/'+encodeURIComponent(id.toLowerCase())+'/review',input);
+    if(!validSettlementReview(result.settlement,id,input))throw new TukuPayApiError(502,'INVALID_RESPONSE','Invalid settlement review response');
+    return result.settlement;
   }
   async getDispatchRecovery(): Promise<{records:DispatchRecovery[];policy:string}> {
     const result=await this.request<unknown>('GET','/v1/ops/dispatch-recovery');
