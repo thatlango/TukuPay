@@ -1,4 +1,5 @@
-import { providerUrl, providerMode, msisdnMode as parseMsisdnMode, airtelVersion, operatorPath } from './provider-settings.js';
+import { getMarket } from './markets.js';
+import { providerUrl, providerMode, msisdnMode as parseMsisdnMode, airtelVersion, operatorPath, mtnTargetEnvironment } from './provider-settings.js';
 import { configuredEnvironment, verifyOperatorMode } from './financial-environment.js';
 import type { CountryCode, ProviderCode } from '../domain/payments.js';
 import type { MsisdnMode } from '../utils/msisdn.js';
@@ -124,7 +125,7 @@ export function getOperatorCredentials(
       baseUrl,
       callbackUrl: providerUrl(required(`${p}_CALLBACK_URL`),mode,`${p}_CALLBACK_URL`),
       mode,
-      targetEnvironment: required(`${p}_TARGET_ENVIRONMENT`),
+      targetEnvironment: mtnTargetEnvironment(mode,required(`${p}_TARGET_ENVIRONMENT`),getMarket(country).providers.find(item=>item.provider==='mtn'&&item.enabled)?.targetEnvironment),
       subscriptionKey: optional(`${p}_COLLECTION_SUBSCRIPTION_KEY`),
       disbursementSubscriptionKey: optional(`${p}_DISBURSEMENT_SUBSCRIPTION_KEY`),
       apiUser: required(`${p}_API_USER`),

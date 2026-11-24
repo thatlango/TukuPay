@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {providerUrl,providerMode,msisdnMode,airtelVersion,operatorPath} from './provider-settings.js';
+import {providerUrl,providerMode,msisdnMode,airtelVersion,operatorPath,mtnTargetEnvironment} from './provider-settings.js';
 test('provider configuration rejects unsafe or conflicting endpoints',()=>{
   assert.equal(providerMode(undefined,'https://sandbox.example.test'),'sandbox');
   assert.equal(providerUrl('http://127.0.0.1:8080','sandbox','BASE_URL'),'http://127.0.0.1:8080');
@@ -17,4 +17,13 @@ test('provider setting enums and path boundaries are explicit',()=>{
   assert.throws(()=>airtelVersion('1.5'));
   assert.equal(operatorPath('/standard/v1/users/balance'),'/standard/v1/users/balance');
   for(const path of ['//other.test','/../x','/x?token=fixture','https://example.test/x'])assert.throws(()=>operatorPath(path));
+});
+
+test('MTN target must match selected environment and market',()=>{
+  assert.equal(mtnTargetEnvironment('sandbox','sandbox','mtnuganda'),'sandbox');
+  assert.equal(mtnTargetEnvironment('production','mtnuganda','mtnuganda'),'mtnuganda');
+  assert.throws(()=>mtnTargetEnvironment('sandbox','mtnuganda','mtnuganda'));
+  assert.throws(()=>mtnTargetEnvironment('production','sandbox','mtnuganda'));
+  assert.throws(()=>mtnTargetEnvironment('production','mtnrwanda','mtnuganda'));
+  assert.throws(()=>mtnTargetEnvironment('production','mtnuganda',undefined));
 });

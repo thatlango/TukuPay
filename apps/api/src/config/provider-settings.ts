@@ -28,3 +28,11 @@ export function operatorPath(value:string|undefined): string|undefined {
   if(!/^\/[A-Za-z0-9/_-]+$/.test(value)||value.includes('//'))throw new Error('Invalid operator path');
   return value;
 }
+
+/** Bind the configured MTN target to the selected mode and market registry. */
+export function mtnTargetEnvironment(mode:'sandbox'|'production',target:string,marketTarget:string|undefined):string {
+  if(mode==='sandbox' ? target!=='sandbox' : !marketTarget||target!==marketTarget||target==='sandbox') {
+    throw new Error('MTN target environment conflicts with configured mode or market');
+  }
+  return target;
+}
