@@ -23,6 +23,7 @@ export async function registerWebhookRoutes(
     const params = request.params as { provider: string; country: string; reference?: string };
     const rail = provider(params.provider.toLowerCase());
     const country = params.country.toUpperCase();
+    if (!/^[A-Z]{2}$/.test(country)) throw new TukuPayError('Invalid callback market', 'INVALID_MARKET', 400);
     const event = await payments.recordWebhook(
       rail,
       country,
@@ -39,6 +40,6 @@ export async function registerWebhookRoutes(
     return reply.code(202).send({ accepted: true });
   };
 
-  app.route({ method: ['POST', 'PUT'], url: '/webhooks/:provider/:country/:reference', bodyLimit: 1_048_576, handler });
-  app.route({ method: ['POST', 'PUT'], url: '/webhooks/:provider/:country', bodyLimit: 1_048_576, handler });
+  app.route({ method: ['POST', 'PUT'], url: '/webhooks/:provider/:country/:reference', bodyLimit: 64 * 1024, handler });
+  app.route({ method: ['POST', 'PUT'], url: '/webhooks/:provider/:country', bodyLimit: 64 * 1024, handler });
 }

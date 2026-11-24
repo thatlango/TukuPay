@@ -1,3 +1,4 @@
+import { requireCallbackMode, validProviderReference } from '../providers/webhook-policy.js';
 import { assertSameIntent } from './idempotency.js';
 import type { PoolClient } from 'pg';
 import { createHash, randomUUID } from 'node:crypto';
@@ -381,10 +382,11 @@ export class PaymentService {
     country: string,
     reference: string | undefined,
     payload: unknown,
-    signature?: string,
+    _signature?: string,
   ): Promise<{ eventId: string | null; reference: string | undefined }> {
     const normalizedCountry = country.toUpperCase();
     const runtimeMode = providerRuntimeMode(provider, normalizedCountry);
+    requireCallbackMode(provider, normalizedCountry, runtimeMode);
     const market = await db.query<{ id: string }>(
       `SELECT id FROM provider_markets
         WHERE provider_code = $1 AND country_code = $2 AND environment = $3 AND enabled = TRUE
@@ -397,7 +399,18 @@ export class PaymentService {
     }
 
     const resolvedReference = reference || extractReference(payload);
-    const payloadText = safePayload(payload);
+    if (!resolvedReference || !validProviderReference(resolvedReference)) {
+      throw new TukuPayError('Invalid callback reference', 'CALLBACK_REFERENCE_INVALID', 400);
+    }
+    // Ignore unsolicited references; never persist arbitrary callback payloads.
+    const known = await db.query(
+      `SELECT 1 FROM provider_transactions
+         WHERE provider_market_id=$1 AND provider_reference=$2
+           AND normalized_status IN ('CREATED','PENDING') LIMIT 1`,
+      [providerMarketId, resolvedReference],
+    );
+    if (!known.rowCount) return { eventId: null, reference: resolvedReference };
+    const payloadText = safePayload({ reference: resolvedReference, kind: 'wake-up' });
     const eventKey = createHash('sha256')
       .update(`${provider}:${normalizedCountry}:${resolvedReference ?? ''}:${payloadText}`)
       .digest('hex');
@@ -407,7 +420,7 @@ export class PaymentService {
        VALUES ($1,$2,$3::jsonb,$4)
        ON CONFLICT (provider_market_id, event_key) WHERE event_key IS NOT NULL DO NOTHING
        RETURNING id`,
-      [providerMarketId, eventKey, payloadText, signature ?? null],
+      [providerMarketId, eventKey, payloadText, null],
     );
     return { eventId: inserted.rows[0]?.id ?? null, reference: resolvedReference };
   }
