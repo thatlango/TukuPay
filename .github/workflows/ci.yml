@@ -25,6 +25,7 @@ jobs:
           --health-retries 20
     env:
       DATABASE_URL: postgres://tukupay:tukupay@127.0.0.1:5432/tukupay
+      TUKUPAY_FINANCIAL_ENVIRONMENT: simulator
       TUKUPAY_SIMULATOR_ENABLED: "true"
       TUKUPAY_SERVICE_TOKEN: ci-admin-token-0123456789
       TUKUPAY_E2E_KELA_TOKEN: ci-kela-token-0123456789
@@ -40,6 +41,8 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm db:migrate
+      - name: Bind disposable simulator database
+        run: psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 -v environment=simulator -f database/checks/bind_empty_environment.sql
       - run: pnpm build
       - name: Configure independent simulator approver
         run: |

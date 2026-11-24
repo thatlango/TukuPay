@@ -1,3 +1,4 @@
+import { configuredEnvironment, verifyOperatorMode } from './financial-environment.js';
 import type { CountryCode, ProviderCode } from '../domain/payments.js';
 import type { MsisdnMode } from '../utils/msisdn.js';
 
@@ -112,6 +113,8 @@ export function getOperatorCredentials(
 ): OperatorCredentials {
   const p = prefix(provider, country);
   const baseUrl = required(`${p}_BASE_URL`).replace(/\/$/, '');
+  const mode = modeFor(p, baseUrl);
+  verifyOperatorMode(configuredEnvironment(), mode);
   const msisdnMode = optional(`${p}_MSISDN_MODE`) === 'e164' ? 'e164' : 'local';
 
   if (provider === 'mtn') {
@@ -120,7 +123,7 @@ export function getOperatorCredentials(
       country,
       baseUrl,
       callbackUrl: required(`${p}_CALLBACK_URL`).replace(/\/$/, ''),
-      mode: modeFor(p, baseUrl),
+      mode,
       targetEnvironment: required(`${p}_TARGET_ENVIRONMENT`),
       subscriptionKey: optional(`${p}_COLLECTION_SUBSCRIPTION_KEY`),
       disbursementSubscriptionKey: optional(`${p}_DISBURSEMENT_SUBSCRIPTION_KEY`),
@@ -142,7 +145,7 @@ export function getOperatorCredentials(
     country,
     baseUrl,
     callbackUrl: required(`${p}_CALLBACK_URL`).replace(/\/$/, ''),
-    mode: modeFor(p, baseUrl),
+    mode,
     targetEnvironment: optional(`${p}_TARGET_ENVIRONMENT`),
     subscriptionKey: undefined,
     disbursementSubscriptionKey: undefined,

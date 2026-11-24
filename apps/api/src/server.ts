@@ -1,3 +1,4 @@
+import { configuredEnvironment, verifyBinding } from './config/financial-environment.js';
 import Fastify from 'fastify';
 import {
   isOperationConfigured,
@@ -21,6 +22,15 @@ import { PayoutService } from './services/payout-service.js';
 import { ProviderRouter } from './services/provider-router.js';
 import { ReconciliationService, startReconciliationWorker } from './services/reconciliation.js';
 import { SettlementService } from './services/settlement-service.js';
+
+const financialEnvironment = configuredEnvironment();
+try {
+  const binding = await db.query<{environment:string}>('SELECT environment FROM financial_environment_binding');
+  verifyBinding(financialEnvironment,binding.rows);
+} catch (error) {
+  await db.end();
+  throw error;
+}
 
 const app = Fastify({ logger: true, bodyLimit: 256 * 1024 });
 
@@ -55,6 +65,7 @@ app.get('/health', async () => ({
   status: 'ok',
   version: '0.3.0',
   simulator: simulatorEnabled(),
+  financialEnvironment,
 }));
 
 app.get('/v1/markets', async () => ({

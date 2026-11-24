@@ -47,10 +47,11 @@ done
 [[ "$ready" == true ]] || { echo "PostgreSQL readiness failed" >&2; exit 1; }
 db_url="postgres://tukupay:$db_password@127.0.0.1:$db_port/tukupay"
 env -i PATH="$PATH" HOME="$HOME" DATABASE_URL="$db_url" pnpm db:migrate
+docker exec -i "$db_id" psql -X -v ON_ERROR_STOP=1 -v environment=simulator -U tukupay -d tukupay < database/checks/bind_empty_environment.sql
 api_port="$(node -e 'const s=require("node:net").createServer();s.listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})')"
 echo "Starting isolated simulator API"
 env -i PATH="$PATH" HOME="$HOME" DATABASE_URL="$db_url" HOST=127.0.0.1 PORT="$api_port" \
-  TUKUPAY_SIMULATOR_ENABLED=true TUKUPAY_LIVE_PAYOUTS_ENABLED=false RECONCILIATION_ENABLED=false \
+  TUKUPAY_FINANCIAL_ENVIRONMENT=simulator TUKUPAY_SIMULATOR_ENABLED=true TUKUPAY_LIVE_PAYOUTS_ENABLED=false RECONCILIATION_ENABLED=false \
   TUKUPAY_SERVICE_TOKEN="$admin" TUKUPAY_SERVICE_TOKENS_JSON="$registry" \
   node apps/api/dist/server.js > "$run_dir/api.log" 2>&1 &
 api_pid=$!
