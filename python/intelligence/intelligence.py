@@ -71,12 +71,18 @@ def analyze(snapshot):
     tx, st = indexes
     findings = []
     matched = 0
+    totals=defaultdict(Counter)
     def flag(key,code,severity):
         country,provider,currency,environment,kind,ref = key
         findings.append(dict(country=country,provider=provider,currency=currency,environment=environment,
                              kind=kind,reference=ref,code=code,severity=severity))
     for key in sorted(tx.keys() | st.keys()):
         a,b = tx.get(key,[]),st.get(key,[])
+        group=totals[key[:5]]
+        group['internal_rows']+=len(a)
+        group['statement_rows']+=len(b)
+        if len(a)==1 and a[0][0]['status']=='SUCCESSFUL': group['internal_success_minor']+=a[0][1]
+        if len(b)==1 and b[0][0]['status']=='SUCCESSFUL': group['statement_success_minor']+=b[0][1]
         if len(a)>1 or len(b)>1:
             flag(key,"DUPLICATE_REFERENCE","high")
             continue
@@ -100,6 +106,8 @@ def analyze(snapshot):
             flag(key,"STATUS_MISMATCH","high")
         elif row["status"]=="SUCCESSFUL":
             matched += 1
+            group['matched_count']+=1
+            group['matched_minor']+=amount
 
     # Deterministic risk heuristics, not a fraud classifier. Exclude ambiguous duplicates.
     amounts = defaultdict(list)
@@ -137,7 +145,14 @@ def analyze(snapshot):
                 sample_days=14,mean_daily_payout_minor=str((sum(values)+13)//14),
                 peak_daily_payout_minor=str(max(values)),mean_daily_collection_minor=str((sum(inflows)+13)//14),
                 seven_day_payout_baseline_minor=str((sum(values)*7+13)//14)))
-    return {"schema_version":1,"as_of":as_of.isoformat(),"transaction_count":len(internal),
+    summary=[]
+    for key,values in sorted(totals.items()):
+        country,provider,currency,environment,kind=key
+        summary.append(dict(country=country,provider=provider,currency=currency,environment=environment,kind=kind,
+                            internal_rows=values["internal_rows"],statement_rows=values["statement_rows"],matched_count=values["matched_count"],
+                            internal_success_minor=str(values["internal_success_minor"]),statement_success_minor=str(values["statement_success_minor"]),
+                            matched_minor=str(values["matched_minor"]),observed_difference_minor=str(values["internal_success_minor"]-values["statement_success_minor"])))
+    return {"reconciliation_by_scope":summary,"schema_version":1,"as_of":as_of.isoformat(),"transaction_count":len(internal),
             "statement_count":len(external),"matched_successful":matched,"findings":findings,
             "finding_counts":dict(sorted(Counter(f["code"] for f in findings).items())),
             "liquidity_baseline":forecasts,"baseline_history_complete":complete,"statement_coverage_complete":snapshot.get("statement_coverage_complete") is True,

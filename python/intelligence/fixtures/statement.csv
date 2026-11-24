@@ -1,0 +1,2 @@
+reference,country,provider,currency,environment,kind,status,amount_minor,timestamp
+fixture-001,UG,mtn,UGX,simulator,collection,SUCCESSFUL,1500,2026-11-23T12:01:00Z

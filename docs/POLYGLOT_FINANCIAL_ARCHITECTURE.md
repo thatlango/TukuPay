@@ -52,3 +52,6 @@ The full existing simulator and PyMoMo contract gate also remains mandatory. No 
 6. Consider a Rust library binding or native service only if measured benefits outweigh integration/operational cost. Review threat model and rollback; retain one transaction/ledger writer. Python stays offline/read-only until data governance, model evaluation and operations controls are approved.
 
 No production cutover is authorized.
+
+### Independent statements and report provenance
+The CLI accepts normalized CSV or JSON arrays. CSV requires exact columns `reference,country,provider,currency,environment,kind,status,amount_minor,timestamp`; an example is in `python/intelligence/fixtures/statement.csv`. Preserve duplicates for investigation. No native operator-specific CSV mapping is assumed. The report records SHA-256 digests of input artifacts and per-scope counts, observed successful totals, matched amounts and differences as integer strings. Duplicate reference groups are excluded from amount totals and remain explicit findings. The observed difference is not an outstanding liability or a certified reconciliation result, particularly when coverage is partial. Never infer completeness from matching totals or a file hash. Review coverage and source authenticity independently.

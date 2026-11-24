@@ -38,6 +38,12 @@ class IntelligenceTests(unittest.TestCase):
         report=analyze(data)
         self.assertEqual(report["finding_counts"],{})
         self.assertFalse(report["statement_coverage_complete"])
+    def test_scope_totals_use_exact_minor_units(self):
+        report=analyze(snapshot([row(amount="1001"),row("r2",currency="USD",amount="500")],[row(amount="1000")]))
+        ugx=next(x for x in report["reconciliation_by_scope"] if x["currency"]=="UGX")
+        self.assertEqual(ugx["observed_difference_minor"],"1")
+        self.assertEqual(ugx["matched_minor"],"0")
+        self.assertEqual(len(report["reconciliation_by_scope"]),2)
     def test_invalid_input(self):
         for value in ["0","1.0","-1","9223372036854775808",100]:
             with self.assertRaises(ValueError): minor(value)
