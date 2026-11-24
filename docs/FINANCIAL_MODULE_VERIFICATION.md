@@ -23,3 +23,18 @@ Node v22.16.0: selected TypeScript files transpiled to ES2022 JavaScript with th
 Rust compilation, Rust unit tests, Rust/TypeScript shadow comparison, Python CLI end-to-end, database snapshot export, full workspace typecheck/build, simulator/PyMoMo integration, benchmarks, and operator certification. Rust/Cargo, pnpm and Docker were unavailable in the local environment.
 
 These results verify the identified source blobs only. They are not full PR or production verification. The CI financial-modules job and scripts/verify-financial.sh are provided for repeatable execution on an equipped host.
+
+
+## Follow-up targeted checks — 24 November 2026
+Candidate source commit: 7a35cfd8243ac0f3d03f3c1b10dcde24af26dffa.
+GitHub DNS resolution still failed. Python 3.13.5 and Node 22.16.0 available; Cargo, pnpm, Docker unavailable.
+The following files were reproduced in an isolated temporary directory and Git blob hashes matched repository blobs.
+- treasury.py: 267b135073dfc49e76ce5b5595bc8e64876bda55
+- risk.py: 98a454cfa71f09accca31debdc5fb62c16481a6a
+- test_treasury_risk.py: 344a45a1a50c445bcbfb5646bbd49d467b984880
+- intelligence-report.mjs: aebb4441d5e59f49252e7bcf77c97cd3889b09fd
+- intelligence-report.test.mjs: 40fab5f22cdaf1216bf7ea0fc28d983258500d1e
+
+Python targeted test_treasury_risk: 5 passed, zero failures. The imported intelligence.py utility functions were reproduced from the current source excerpt, not the complete blob. This is an isolated component test, not full package verification.
+Node --test intelligence-report.test.mjs: 2 passed, zero failures.
+Not executed: full Python suite/CLI, actual report file load or workspace browser test, Rust compilation and journal audit, database export, SDK/API typecheck, simulator/PyMoMo, benchmark or production verification. No operator/database connection or financial write made. CI and local scripts extended to cover the new fixtures and dashboard checks.

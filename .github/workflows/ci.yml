@@ -73,17 +73,22 @@ jobs:
       - name: Python intelligence
         run: |
           python3 -m unittest discover -s python/intelligence -p 'test_*.py' -v
-          python3 python/intelligence/cli.py python/intelligence/fixtures/sample.json
+          python3 python/intelligence/cli.py python/intelligence/fixtures/sample.json --statements python/intelligence/fixtures/statement.csv
       - name: Rust financial kernel
         run: |
           rustc --version
           cargo test --manifest-path crates/financial-kernel/Cargo.toml --locked --offline
-          cargo build --manifest-path crates/financial-kernel/Cargo.toml --locked --offline --bin shadow
+          cargo build --manifest-path crates/financial-kernel/Cargo.toml --locked --offline --bin shadow --bin journal_audit
+          crates/financial-kernel/target/debug/journal_audit < contracts/financial/journals.tsv
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - run: corepack enable
       - run: pnpm install --no-frozen-lockfile
       - run: pnpm build
+      - name: Intelligence report validation
+        run: |
+          node --test scripts/intelligence-report.test.mjs
+          node --check scripts/ops-workspace.mjs
       - name: Financial kernel parity
         run: node scripts/compare-financial-kernel.mjs crates/financial-kernel/target/debug/shadow
