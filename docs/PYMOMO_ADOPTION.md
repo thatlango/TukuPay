@@ -38,3 +38,14 @@ Candidate provider catalog (not routable): M-Pesa, Paystack, Flutterwave, Wave, 
 Draft only. No live calls, credentials, activation, deployment or merge. Verify CI and local isolated test evidence, then review security and finance gates before requesting production activation. Existing tests are not evidence of regulatory authorization. Collections on behalf of unrelated third parties and cross-border remittances require separate compliance assessment.
 
 Run `psql "$DATABASE_URL" -X -qAt -v ON_ERROR_STOP=1 -f database/checks/payment_integrity.sql` against an approved read-only connection to identify missing/unbalanced journals and duplicate payout attempts. Historical exceptions require manual investigation; this change does not backfill or modify prior records.
+
+## Local verification without GitHub Actions
+Prerequisites: checkout of the candidate branch, Node 22+, pnpm 9, Docker running locally, curl, and installed workspace dependencies (`pnpm install --no-frozen-lockfile`). The verifier creates its own disposable PostgreSQL container and loopback simulator API, uses generated test-only credentials, strips inherited environment variables from the application processes, and removes its own processes/container on exit. It does not accept a production database URL or a live operator endpoint.
+
+```sh
+bash scripts/verify-local.sh
+# With the reviewed, pinned PyMoMo environment installed:
+bash scripts/verify-local.sh --pymomo
+```
+
+Completion: exit code zero and PASS output, plus successful PyMoMo contract output for the full release gate. Save terminal output and commit SHA as evidence. A run without --pymomo does not satisfy the external contract gate. Dependency installation is not lockfile reproducible yet; resolve and review the dependency lock before production release.
