@@ -1,3 +1,4 @@
+import { requireUuid } from '../utils/request-validation.js';
 import type { FastifyInstance } from 'fastify';
 import { requireProductAccess, requireScopes } from '../auth/service-auth.js';
 import type { CreatePaymentInput, ProviderCode } from '../domain/payments.js';
@@ -59,14 +60,14 @@ export async function registerPaymentRoutes(
   });
 
   app.get('/v1/payments/:id', { preHandler: requireScopes('payments:read') }, async (request) => {
-    const { id } = request.params as { id: string };
+    const id = requireUuid((request.params as { id: string }).id);
     const payment = await payments.getById(id);
     requireProductAccess(request, payment.product);
     return { payment };
   });
 
   app.post('/v1/payments/:id/refresh', { preHandler: requireScopes('payments:refresh') }, async (request) => {
-    const { id } = request.params as { id: string };
+    const id = requireUuid((request.params as { id: string }).id);
     requireProductAccess(request, (await payments.getById(id)).product);
     return { payment: await payments.refresh(id) };
   });

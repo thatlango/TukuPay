@@ -1,3 +1,4 @@
+import { boundedInteger } from '../utils/request-validation.js';
 import { timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { db } from '../db/pool.js';
@@ -75,8 +76,7 @@ export async function registerInternalRoutes(
     const body = request.body && typeof request.body === 'object'
       ? request.body as { limit?: unknown }
       : {};
-    const parsed = Number(body.limit ?? 50);
-    const limit = Number.isFinite(parsed) ? Math.max(1, Math.min(parsed, 500)) : 50;
+    const limit = boundedInteger(body.limit,50,1,500);
     return { reconciliation: await reconciliation.runBatch(limit) };
   });
 }

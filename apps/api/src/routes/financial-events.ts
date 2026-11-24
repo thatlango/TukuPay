@@ -1,3 +1,4 @@
+import { requireUuid } from '../utils/request-validation.js';
 import type { FastifyInstance } from 'fastify';
 import { identifyService,requireProductAccess,requireScopes } from '../auth/service-auth.js';
 import { db } from '../db/pool.js';
@@ -19,8 +20,7 @@ export async function registerFinancialEventRoutes(app:FastifyInstance):Promise<
     const {product,id}=request.params as {product:string;id:string};
     const code=product.trim().toLowerCase();
     requireProductAccess(request,code);
-    if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id))
-      throw new TukuPayError('Invalid event ID','VALIDATION_ERROR',400);
+    requireUuid(id);
     const actor=identifyService(request)?.service;
     if(!actor)throw new TukuPayError('Authentication required','UNAUTHORIZED',401);
     const found=await db.query('SELECT id FROM financial_events WHERE id=$1 AND product_code=$2',[id,code]);
