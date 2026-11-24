@@ -68,6 +68,8 @@ export type PaymentException = {
   kind: 'collection' | 'payout'; id: string; product_code: string; country_code: string;
   provider_code: Provider; currency: string; status: string; created_at: string;
   last_checked_at: string | null; attempts: number; has_error: boolean; reason: string;
+  review_state: 'OPEN' | 'INVESTIGATING' | 'ESCALATED' | 'REVIEWED' | null;
+  assigned_to: string | null; review_updated_at: string | null; review_version: number;
 };
 export class TukuPayApiError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) {
@@ -171,6 +173,9 @@ export class TukuPayClient {
   async getExceptions(limit = 50): Promise<{ generatedAt: string; limit: number; exceptions: PaymentException[] }> {
     const bounded = Number.isFinite(limit) ? Math.max(1, Math.min(200, Math.trunc(limit))) : 50;
     return this.request('GET','/v1/ops/exceptions?limit=' + bounded);
+  }
+  async reviewException(input: { kind: 'collection' | 'payout'; id: string; state: 'OPEN' | 'INVESTIGATING' | 'ESCALATED' | 'REVIEWED'; assignedTo: string | null; note: string; expectedVersion: number }) {
+    return this.request<{ review: Record<string, unknown> }>('POST','/v1/ops/exceptions/review',input);
   }
   async getOpsSummary(): Promise<{ ops: Record<string, unknown> }> {
     return this.request('GET','/v1/ops/summary');

@@ -1,3 +1,4 @@
+import { parseReview, recordExceptionReview } from '../services/exception-review.js';
 import { transportMetrics } from '../providers/telemetry.js';
 import type { FastifyInstance } from 'fastify';
 import { identifyService, requireScopes } from '../auth/service-auth.js';
@@ -18,6 +19,12 @@ export async function registerOpsRoutes(
   app.get('/v1/ops/exceptions', { preHandler: requireScopes('ops:read') }, async (request) => {
     const query = request.query as { limit?: string };
     return ops.exceptions(Number(query.limit ?? 50));
+  });
+
+  app.post('/v1/ops/exceptions/review', { preHandler: requireScopes('ops:manage') }, async (request) => {
+    const actor = identifyService(request)?.service;
+    if (!actor) throw new TukuPayError('Authenticated reviewer required','UNAUTHORIZED',401);
+    return { review: await recordExceptionReview(parseReview(request.body), actor) };
   });
 
   app.get('/v1/ops/summary', { preHandler: requireScopes('ops:read') }, async () => ({

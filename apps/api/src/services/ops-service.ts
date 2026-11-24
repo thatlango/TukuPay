@@ -294,12 +294,13 @@ export class OpsService {
           ) pt ON TRUE
          WHERE pr.status IN ('APPROVED','PENDING')
       )
-      SELECT *,CASE WHEN has_error THEN 'PROVIDER_ERROR'
+      SELECT pending.*,review.state AS review_state,review.assigned_to,review.updated_at AS review_updated_at,
+             coalesce(review.version,0) AS review_version,CASE WHEN has_error THEN 'PROVIDER_ERROR'
                     WHEN status='APPROVED' THEN 'AWAITING_DISPATCH'
                     ELSE 'STALE_PENDING' END AS reason
-        FROM pending
+        FROM pending LEFT JOIN payment_exception_reviews review ON review.kind=pending.kind AND review.transaction_id=pending.id
        WHERE has_error OR created_at < now()-interval '30 minutes'
-       ORDER BY has_error DESC,created_at ASC,id LIMIT $1`,
+       ORDER BY has_error DESC,created_at ASC,pending.id LIMIT $1`,
       [bounded],
     );
     return { generatedAt: new Date().toISOString(), limit: bounded, exceptions: result.rows };
