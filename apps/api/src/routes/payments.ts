@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { requireScopes } from '../auth/service-auth.js';
+import { requireProductAccess, requireScopes } from '../auth/service-auth.js';
 import type { CreatePaymentInput, ProviderCode } from '../domain/payments.js';
 import { TukuPayError } from '../errors.js';
 import type { PaymentService } from '../services/payment-service.js';
@@ -52,17 +52,22 @@ export async function registerPaymentRoutes(
   app.post('/v1/payments', { preHandler: requireScopes('payments:create') }, async (request, reply) => {
     const header = request.headers['idempotency-key'];
     const idempotencyKey = Array.isArray(header) ? header[0] : header;
-    const payment = await payments.create(parseInput(request.body), idempotencyKey);
+    const input = parseInput(request.body);
+    requireProductAccess(request, input.product);
+    const payment = await payments.create(input, idempotencyKey);
     return reply.code(payment.status === 'PENDING' ? 202 : 201).send({ payment });
   });
 
   app.get('/v1/payments/:id', { preHandler: requireScopes('payments:read') }, async (request) => {
     const { id } = request.params as { id: string };
-    return { payment: await payments.getById(id) };
+    const payment = await payments.getById(id);
+    requireProductAccess(request, payment.product);
+    return { payment };
   });
 
   app.post('/v1/payments/:id/refresh', { preHandler: requireScopes('payments:refresh') }, async (request) => {
     const { id } = request.params as { id: string };
+    requireProductAccess(request, (await payments.getById(id)).product);
     return { payment: await payments.refresh(id) };
   });
 }

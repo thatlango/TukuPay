@@ -46,6 +46,14 @@ assert(conflict.response.status === 409, 'changed amount must not silently reuse
 result = await call('POST', `/v1/payments/${paymentId}/refresh`, kela);
 assert(result.payload.payment.status === 'SUCCESSFUL', 'simulated payment should become SUCCESSFUL');
 
+const foreign = await call('POST', '/v1/payments', kela, { ...paymentBody, product: 'units', externalId: `FOREIGN-${stamp}` });
+assert(foreign.response.status === 403, 'cross-product create is denied');
+const other = await call('POST', '/v1/payments', admin, { ...paymentBody, product: 'units', externalId: `OTHER-${stamp}` });
+assert(other.response.status === 202, 'admin can create other product payment');
+const otherId = other.payload.payment.id;
+assert((await call('GET', `/v1/payments/${otherId}`, kela)).response.status === 403, 'cross-product read is denied');
+assert((await call('POST', `/v1/payments/${otherId}/refresh`, kela)).response.status === 403, 'cross-product refresh is denied');
+
 const delayedBody = {
   ...paymentBody,
   externalId: `E2E-DELAY-${stamp}`,
