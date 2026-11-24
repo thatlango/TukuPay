@@ -9,9 +9,9 @@ export function parseReview(input: unknown): ReviewInput {
   const v = input as Record<string, unknown>;
   if ((v.kind !== 'collection' && v.kind !== 'payout') || typeof v.id !== 'string'
     || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v.id)
-    || !['OPEN','INVESTIGATING','ESCALATED','REVIEWED'].includes(String(v.state))
+    || (typeof v.state !== 'string' || !['OPEN','INVESTIGATING','ESCALATED','REVIEWED'].includes(v.state))
     || typeof v.note !== 'string' || !v.note.trim() || v.note.length > 1000
-    || typeof v.expectedVersion !== 'number' || !Number.isSafeInteger(v.expectedVersion) || v.expectedVersion < 0
+    || typeof v.expectedVersion !== 'number' || !Number.isSafeInteger(v.expectedVersion) || v.expectedVersion < 0 || v.expectedVersion >= 2147483647
     || (v.assignedTo !== null && (typeof v.assignedTo !== 'string' || !/^[a-zA-Z0-9_.@-]{1,100}$/.test(v.assignedTo)))) {
     throw new TukuPayError('Invalid exception review','INVALID_REVIEW',400);
   }

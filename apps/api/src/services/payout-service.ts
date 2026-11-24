@@ -372,7 +372,7 @@ export class PayoutService {
         providerReference,
         retryable ? 'PENDING' : 'FAILED',
         null,
-        error instanceof Error ? error.message : 'Unknown provider error',
+        'Provider request failed; review transport telemetry',
       );
     }
     return this.getById(id);
@@ -411,7 +411,7 @@ export class PayoutService {
         });
       } catch (error) {
         await this.applyStatus(id, payout.providerReference, 'PENDING', status.raw,
-          error instanceof Error ? error.message : 'Settlement verification failed');
+          'Settlement evidence verification failed');
         throw new TukuPayError('Provider settlement could not be verified', 'SETTLEMENT_UNVERIFIED', 502);
       }
     }

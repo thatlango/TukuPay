@@ -34,7 +34,7 @@ export async function registerWebhookRoutes(
 
     if (event.eventId) setImmediate(() => {
       void payments.processWebhook(event.eventId, rail, country, event.reference)
-        .catch((error) => request.log.error({ err: error }, 'Webhook verification failed'));
+        .catch(() => request.log.error({ event: 'webhook_verification_failed' }, 'Webhook verification failed'));
     });
 
     return reply.code(202).send({ accepted: true });

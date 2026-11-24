@@ -253,7 +253,7 @@ export class PaymentService {
     } catch (error) {
       const retryable = !(error instanceof ProviderHttpError) || error.retryable;
       const status: PaymentStatus = retryable ? 'PENDING' : 'FAILED';
-      const message = error instanceof Error ? error.message : 'Unknown provider error';
+      const message = 'Provider request failed; review transport telemetry';
       await this.applyStatus(paymentId, providerReference, status, null, message);
       if (!retryable) {
         throw new TukuPayError(
@@ -339,7 +339,7 @@ export class PaymentService {
         });
       } catch (error) {
         await this.applyStatus(id, transaction.provider_reference, 'PENDING', status.raw,
-          error instanceof Error ? error.message : 'Settlement verification failed');
+          'Settlement evidence verification failed');
         throw new TukuPayError('Provider settlement could not be verified', 'SETTLEMENT_UNVERIFIED', 502);
       }
     }
@@ -447,7 +447,7 @@ export class PaymentService {
       if (eventId) {
         await db.query(
           'UPDATE webhook_events SET processed_at = now(), processing_error = $2 WHERE id = $1',
-          [eventId, error instanceof Error ? error.message : 'Unknown webhook processing error'],
+          [eventId, 'Webhook processing failed'],
         );
       }
       throw error;

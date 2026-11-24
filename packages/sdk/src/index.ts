@@ -188,6 +188,13 @@ export class TukuPayClient {
     if (!validEventBatch(result,this.product)) throw new TukuPayApiError(502,'INVALID_RESPONSE','Invalid financial event response');
     return result;
   }
+  /** Acknowledge only after the consumer has durably processed the event. */
+  async acknowledgeFinancialEvent(id:string): Promise<{id:string;acknowledged:true}> {
+    if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id))throw new Error('Invalid event ID');
+    const result=await this.request<{id:string;acknowledged:true}>('POST','/v1/products/'+encodeURIComponent(this.product)+'/financial-events/'+encodeURIComponent(id.toLowerCase())+'/ack');
+    if(result.id!==id.toLowerCase() || result.acknowledged!==true)throw new TukuPayApiError(502,'INVALID_RESPONSE','Invalid event acknowledgement response');
+    return result;
+  }
   async getDispatchRecovery(): Promise<{records:DispatchRecovery[];policy:string}> {
     const result=await this.request<unknown>('GET','/v1/ops/dispatch-recovery');
     if(!validRecovery(result))throw new TukuPayApiError(502,'INVALID_RESPONSE','Invalid recovery response');
