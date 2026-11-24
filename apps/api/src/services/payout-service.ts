@@ -1,3 +1,4 @@
+import { checkPayoutLimits, readPayoutLimits } from './payout-limits.js';
 import { assertSameIntent } from './idempotency.js';
 import type { PoolClient } from 'pg';
 import { randomUUID } from 'node:crypto';
@@ -162,6 +163,7 @@ export class PayoutService {
     }
 
     const amountMinor = majorToMinor(amount, currency);
+    if (runtimeMode === 'production') checkPayoutLimits(amountMinor, 0n, readPayoutLimits(country, currency));
     const rawPhone = required(input.phone, 'phone');
     const phone = operatorSandbox
       ? normalizeSandboxMsisdn(rawPhone)
@@ -282,6 +284,25 @@ export class PayoutService {
     let reserved = false;
     try {
       await client.query('BEGIN');
+      if (runtimeMode === 'production') {
+        // Serialize reservations across providers/products for the same market and currency.
+        const key = 'tukupay-payout-limit:' + payout.country + ':' + payout.currency;
+        await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [key]);
+        const sum = await client.query<{ reserved: string }>(
+          `SELECT COALESCE(SUM(pr.amount_minor),0)::text AS reserved
+             FROM payout_requests pr
+            WHERE pr.country_code=$1 AND pr.currency=$2
+              AND EXISTS (
+                SELECT 1 FROM provider_payout_transactions pt
+                JOIN provider_markets pm ON pm.id=pt.provider_market_id
+                 WHERE pt.payout_request_id=pr.id AND pm.environment='production'
+                   AND pt.created_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
+              )`,
+          [payout.country, payout.currency],
+        );
+        checkPayoutLimits(majorToMinor(payout.amount, payout.currency),
+          BigInt(sum.rows[0]?.reserved ?? '0'), readPayoutLimits(payout.country, payout.currency));
+      }
       const claimed = await client.query(
         "UPDATE payout_requests SET status='PENDING', updated_at=now() WHERE id=$1 AND status='APPROVED' RETURNING id",
         [id],
