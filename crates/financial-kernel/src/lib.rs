@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 //! Pure, deterministic rules. No database, network, keys, or payment dispatch.
 use std::fmt;
+pub mod journal_audit;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuleError { Currency, Amount, Precision, Overflow, Limits, Journal, Transition }
