@@ -75,6 +75,9 @@ const timeoutBody = { ...paymentBody, externalId: `E2E-TIMEOUT-${stamp}`, metada
 result = await call('POST', '/v1/payments', kela, timeoutBody, `timeout-${stamp}`);
 assert(result.response.status === 202 && result.payload.payment.status === 'PENDING', 'ambiguous write must remain pending');
 const timeoutId = result.payload.payment.id;
+const exceptions = await call('GET', '/v1/ops/exceptions', admin);
+assert(exceptions.response.ok && exceptions.payload.exceptions.some(row => row.id === timeoutId && row.reason === 'PROVIDER_ERROR'), 'ambiguous write must appear in exception queue');
+assert((await call('GET', '/v1/ops/exceptions', kela)).response.status === 403, 'product without ops scope must not see exceptions');
 const timeoutRef = result.payload.payment.providerReference;
 result = await call('POST', '/v1/payments', kela, timeoutBody, `timeout-${stamp}`);
 assert(result.payload.payment.id === timeoutId && result.payload.payment.providerReference === timeoutRef, 'retry must reuse original payment and provider reference');

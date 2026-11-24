@@ -306,7 +306,15 @@ export class PaymentService {
     const status = await adapter.getStatus(
       { country: transaction.country_code, currency: transaction.currency },
       transaction.provider_reference,
-    );
+    ).catch(async (error: unknown) => {
+      await db.query(
+        `UPDATE provider_transactions SET last_checked_at=now(), attempts=attempts+1,
+          last_error='Provider status request failed', updated_at=now()
+          WHERE payment_intent_id=$1 AND provider_reference=$2 AND normalized_status IN ('CREATED','PENDING')`,
+        [id, transaction.provider_reference],
+      );
+      throw error;
+    });
     if (status.status === 'SUCCESSFUL') {
       try {
         assertSuccessfulSettlement(status.raw, {
@@ -349,11 +357,14 @@ export class PaymentService {
 
   async pendingPaymentIds(limit: number): Promise<string[]> {
     const result = await db.query<{ payment_intent_id: string }>(
-      `SELECT DISTINCT pt.payment_intent_id
+      `SELECT pt.payment_intent_id
          FROM provider_transactions pt
         WHERE pt.normalized_status IN ('CREATED','PENDING')
-          AND (pt.last_checked_at IS NULL OR pt.last_checked_at < now() - interval '5 seconds')
-        ORDER BY pt.payment_intent_id
+          AND (pt.last_checked_at IS NULL OR pt.last_checked_at < now() -
+            CASE WHEN pt.last_error IS NULL THEN interval '5 seconds'
+                 ELSE interval '5 seconds' * LEAST(60, POWER(2, LEAST(pt.attempts, 6))) END)
+        GROUP BY pt.payment_intent_id
+        ORDER BY MIN(pt.last_checked_at) NULLS FIRST, pt.payment_intent_id
         LIMIT $1`,
       [limit],
     );

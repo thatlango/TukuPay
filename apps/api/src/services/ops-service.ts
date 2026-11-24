@@ -260,6 +260,43 @@ export class OpsService {
     };
   }
 
+  /** Read-only queue: do not expose raw provider payloads or customer details. */
+  async exceptions(limit = 50): Promise<Record<string, unknown>> {
+    const bounded = Number.isFinite(limit) ? Math.max(1, Math.min(200, Math.trunc(limit))) : 50;
+    const result = await db.query(
+      `WITH pending AS (
+        SELECT 'collection' AS kind,pi.id,pi.product_code,pi.country_code,pm.provider_code,
+               pi.currency,pi.status,pi.created_at,pt.last_checked_at,pt.attempts,
+               pt.last_error IS NOT NULL AS has_error
+          FROM payment_intents pi
+          JOIN LATERAL (
+            SELECT * FROM provider_transactions WHERE payment_intent_id=pi.id
+             ORDER BY created_at DESC LIMIT 1
+          ) pt ON TRUE
+          JOIN provider_markets pm ON pm.id=pt.provider_market_id
+         WHERE pi.status IN ('CREATED','PENDING')
+        UNION ALL
+        SELECT 'payout',pr.id,pr.product_code,pr.country_code,pr.provider_code,
+               pr.currency,pr.status,pr.created_at,pt.last_checked_at,coalesce(pt.attempts,0),
+               pt.last_error IS NOT NULL
+          FROM payout_requests pr
+          LEFT JOIN LATERAL (
+            SELECT * FROM provider_payout_transactions WHERE payout_request_id=pr.id
+             ORDER BY created_at DESC LIMIT 1
+          ) pt ON TRUE
+         WHERE pr.status IN ('APPROVED','PENDING')
+      )
+      SELECT *,CASE WHEN has_error THEN 'PROVIDER_ERROR'
+                    WHEN status='APPROVED' THEN 'AWAITING_DISPATCH'
+                    ELSE 'STALE_PENDING' END AS reason
+        FROM pending
+       WHERE has_error OR created_at < now()-interval '30 minutes'
+       ORDER BY has_error DESC,created_at ASC,id LIMIT $1`,
+      [bounded],
+    );
+    return { generatedAt: new Date().toISOString(), limit: bounded, exceptions: result.rows };
+  }
+
   async captureBalance(
     provider: ProviderCode,
     country: string,

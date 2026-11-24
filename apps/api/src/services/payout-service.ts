@@ -348,7 +348,15 @@ export class PayoutService {
     const status = await adapter.getPayoutStatus(
       { country: payout.country, currency: payout.currency },
       payout.providerReference,
-    );
+    ).catch(async (error: unknown) => {
+      await db.query(
+        `UPDATE provider_payout_transactions SET last_checked_at=now(), attempts=attempts+1,
+          last_error='Provider status request failed', updated_at=now()
+          WHERE payout_request_id=$1 AND provider_reference=$2 AND normalized_status='PENDING'`,
+        [id, payout.providerReference],
+      );
+      throw error;
+    });
     if (status.status === 'SUCCESSFUL') {
       try {
         assertSuccessfulSettlement(status.raw, {
@@ -371,11 +379,14 @@ export class PayoutService {
 
   async pendingPayoutIds(limit: number): Promise<string[]> {
     const result = await db.query<{ payout_request_id: string }>(
-      `SELECT DISTINCT payout_request_id
+      `SELECT payout_request_id
          FROM provider_payout_transactions
         WHERE normalized_status='PENDING'
-          AND (last_checked_at IS NULL OR last_checked_at < now() - interval '5 seconds')
-        ORDER BY payout_request_id
+          AND (last_checked_at IS NULL OR last_checked_at < now() -
+            CASE WHEN last_error IS NULL THEN interval '5 seconds'
+                 ELSE interval '5 seconds' * LEAST(60, POWER(2, LEAST(attempts, 6))) END)
+        GROUP BY payout_request_id
+        ORDER BY MIN(last_checked_at) NULLS FIRST, payout_request_id
         LIMIT $1`,
       [Math.max(1, Math.min(limit, 500))],
     );

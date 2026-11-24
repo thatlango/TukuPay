@@ -13,6 +13,11 @@ export async function registerOpsRoutes(
 ): Promise<void> {
   app.get('/v1/ops/provider-transport', { preHandler: requireScopes('ops:read') }, async () => transportMetrics.snapshot());
 
+  app.get('/v1/ops/exceptions', { preHandler: requireScopes('ops:read') }, async (request) => {
+    const query = request.query as { limit?: string };
+    return ops.exceptions(Number(query.limit ?? 50));
+  });
+
   app.get('/v1/ops/summary', { preHandler: requireScopes('ops:read') }, async () => ({
     ops: await ops.summary(),
   }));
