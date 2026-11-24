@@ -43,3 +43,15 @@ Every issue has implementation and acceptance evidence, all release gates closed
 
 ## Expanded offline verification
 At candidate 860e225ee66a0fff5135e99600f70c79dad8680a all five Python test modules ran together: 29 tests passed in 0.018s, zero failures (includes the ten intelligence tests above; not additive). All eleven source/test files and both fixtures matched repository Git blob hashes before execution. Command: python3 -m unittest discover -s . -p 'test_*.py' -v in isolated reconstructed module directory. CLI fixture and batch CLI fixture both passed with one matched successful record and HUMAN_REVIEW_ONLY decision. CLI blob hash 75ffa75b0ea2eb7d045123ad76b0415a8cfd1e9e matched repository. Total unique unit groups: 29 Python + 3 Node = 32. Two offline CLI smoke checks also passed. No provider or database access, full build or release gate closure.
+
+## API and SDK validation slice
+Commits 66def61dfb776f0647c8230f59bda0fdd16bdd16, fa81db27c3ece9b84a0a576d1696b4f55e598d7f and 528933bdeb86dae6670a3b7bb289271b70dad894.
+- Shared UUID validation before database access in payment, payout, settlement review and event acknowledgement routes. Strict integer limits for exceptions and manual reconciliation; explicit balance account validation. Missing limit uses the documented default; malformed or out-of-range limits return 400 rather than being clamped. Missing balance account retains the collection default.
+- SDK rejects non-object response envelopes and structurally invalid payment/payout responses, including unexpected product scope. The new getFinancialEvents() method reads product-scoped event batches and validates event schema, scope, identifiers, status, exact positive minor-unit strings and duplicate IDs. This is read-only retrieval, not consumer delivery or acknowledgement integration. SDK package test command builds then runs compiled response tests. SDK instances are intended to be scoped to one product; callers relying on an admin SDK instance to read unrelated products must migrate. Shape validation is not proof of financial correctness or evidence authenticity.
+- Executed isolated strict TypeScript compilation with ES2022/NodeNext, noUncheckedIndexedAccess, exactOptionalPropertyTypes and local Node type declarations; Node 22.16.0. Validation helper tests: 3 passed, 0 failed (64.601878 ms). SDK response helper tests: 3 passed, 0 failed (58.501037 ms). Exact Git blob hashes match executed sources:
+  - errors.ts bc96773dc3fb8a096c6203ce4e506b10e78b30b5
+  - request-validation.ts b37b469bcd5e759231accc5d6f679fd732f4a8cc
+  - request-validation.test.ts aaacaca90994fd78a1a44e90c3cfd52aa113636e
+  - response.ts 81215631b03bfbd1dd24bb3668c30b4edd1fc45f
+  - response.test.ts 52a25d99bbd88bf6363e1da0d106ac5e2d3dd343
+- Inspected committed route and SDK wiring. Full API and SDK compilation, package-manager execution, HTTP integration and PostgreSQL verification are not established by helper tests. STAB-05 remains open. No production changes or financial requests.
