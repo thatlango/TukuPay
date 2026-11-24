@@ -1,3 +1,6 @@
+import { validEventBatch, validTransaction, type FinancialEvent } from './response.js';
+export type { FinancialEvent } from './response.js';
+
 export type Provider = 'mtn' | 'airtel';
 
 export type Money = { amount: string; currency: string };
@@ -128,7 +131,7 @@ export class TukuPayClient {
       const error = payload as { error?: { code?: string; message?: string } } | null;
       throw new TukuPayApiError(response.status, error?.error?.code ?? 'ERROR', error?.error?.message ?? 'Request failed');
     }
-    if (payload === null || typeof payload !== 'object') throw new TukuPayApiError(response.status, 'INVALID_RESPONSE', 'Invalid TukuPay response');
+    if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) throw new TukuPayApiError(response.status, 'INVALID_RESPONSE', 'Invalid TukuPay response');
     return payload as T;
   }
 
@@ -140,32 +143,48 @@ export class TukuPayClient {
       { ...input, product: this.product },
       idempotencyKey,
     );
+    if (!validTransaction(result.payment,this.product,'payment')) throw new TukuPayApiError(502,'INVALID_RESPONSE','Invalid payment response');
     return result.payment;
   }
 
   async getPayment(id: string): Promise<Payment> {
     const result = await this.request<{ payment: Payment }>('GET', `/v1/payments/${encodeURIComponent(id)}`);
+    if (!validTransaction(result.payment,this.product,'payment')) throw new TukuPayApiError(502,'INVALID_RESPONSE','Invalid payment response');
     return result.payment;
   }
 
   async refreshPayment(id: string): Promise<Payment> {
     const result = await this.request<{ payment: Payment }>('POST', `/v1/payments/${encodeURIComponent(id)}/refresh`);
+    if (!validTransaction(result.payment,this.product,'payment')) throw new TukuPayApiError(502,'INVALID_RESPONSE','Invalid payment response');
     return result.payment;
   }
 
   async createPayout(input: CreatePayout, idempotencyKey: string): Promise<Payout> {
     if (!idempotencyKey.trim()) throw new Error('Idempotency key is required');
-    return (await this.request<{ payout: Payout }>('POST', '/v1/payouts', { ...input, product: this.product }, idempotencyKey)).payout;
+    const result = await this.request<{ payout: Payout }>('POST', '/v1/payouts', { ...input, product: this.product }, idempotencyKey);
+    if (!validTransaction(result.payout,this.product,'payout')) throw new TukuPayApiError(502,'INVALID_RESPONSE','Invalid payout response');
+    return result.payout;
   }
   async getPayout(id: string): Promise<Payout> {
-    return (await this.request<{ payout: Payout }>('GET', '/v1/payouts/' + encodeURIComponent(id))).payout;
+    const result = await this.request<{ payout: Payout }>('GET', '/v1/payouts/' + encodeURIComponent(id));
+    if (!validTransaction(result.payout,this.product,'payout')) throw new TukuPayApiError(502,'INVALID_RESPONSE','Invalid payout response');
+    return result.payout;
   }
   async approvePayout(id: string, reason: string): Promise<Payout> {
     if (!reason.trim()) throw new Error('Approval reason is required');
-    return (await this.request<{ payout: Payout }>('POST', '/v1/payouts/' + encodeURIComponent(id) + '/approve', { reason })).payout;
+    const result = await this.request<{ payout: Payout }>('POST', '/v1/payouts/' + encodeURIComponent(id) + '/approve', { reason });
+    if (!validTransaction(result.payout,this.product,'payout')) throw new TukuPayApiError(502,'INVALID_RESPONSE','Invalid payout response');
+    return result.payout;
   }
   async refreshPayout(id: string): Promise<Payout> {
-    return (await this.request<{ payout: Payout }>('POST', '/v1/payouts/' + encodeURIComponent(id) + '/refresh')).payout;
+    const result = await this.request<{ payout: Payout }>('POST', '/v1/payouts/' + encodeURIComponent(id) + '/refresh');
+    if (!validTransaction(result.payout,this.product,'payout')) throw new TukuPayApiError(502,'INVALID_RESPONSE','Invalid payout response');
+    return result.payout;
+  }
+  async getFinancialEvents(): Promise<{ delivery: 'at-least-once'; events: FinancialEvent[] }> {
+    const result = await this.request<unknown>('GET','/v1/products/' + encodeURIComponent(this.product) + '/financial-events');
+    if (!validEventBatch(result,this.product)) throw new TukuPayApiError(502,'INVALID_RESPONSE','Invalid financial event response');
+    return result;
   }
   async getCapabilities(): Promise<Capabilities> {
     return this.request<Capabilities>('GET','/v1/ops/provider-capabilities');
