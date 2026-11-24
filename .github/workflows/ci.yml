@@ -6,9 +6,17 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: tukupay-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     services:
       postgres:
         image: postgres:17-alpine
@@ -33,11 +41,24 @@ jobs:
       RECONCILIATION_ENABLED: "false"
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: corepack enable
-      - run: pnpm install --no-frozen-lockfile
+      - name: Prepare pinned package manager
+        run: |
+          corepack enable
+          pnpm --version
+          test "$(pnpm --version)" = "9.15.4"
+      - name: Install dependencies
+        run: |
+          if test -f pnpm-lock.yaml; then
+            pnpm install --frozen-lockfile
+          else
+            echo '::warning::Development verification only: dependency lockfile is missing.'
+            pnpm install --no-frozen-lockfile
+          fi
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm db:migrate
@@ -58,6 +79,8 @@ jobs:
           exit 1
       - name: Simulator end-to-end
         run: node apps/api/scripts/e2e-simulator.mjs
+      - name: Record tested revision
+        run: git rev-parse HEAD
       - name: Verify simulator journal and payout invariants
         run: |
           psql "$DATABASE_URL" -X -qAt -v ON_ERROR_STOP=1 -f database/checks/payment_integrity.sql > /tmp/tukupay-integrity.txt
@@ -68,8 +91,11 @@ jobs:
 
   financial-modules:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
@@ -86,8 +112,19 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: corepack enable
-      - run: pnpm install --no-frozen-lockfile
+      - name: Prepare pinned package manager
+        run: |
+          corepack enable
+          pnpm --version
+          test "$(pnpm --version)" = "9.15.4"
+      - name: Install dependencies
+        run: |
+          if test -f pnpm-lock.yaml; then
+            pnpm install --frozen-lockfile
+          else
+            echo '::warning::Development verification only: dependency lockfile is missing.'
+            pnpm install --no-frozen-lockfile
+          fi
       - run: pnpm build
       - name: Intelligence report validation
         run: |

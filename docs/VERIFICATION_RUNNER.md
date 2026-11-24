@@ -14,3 +14,5 @@ Node 22, pinned pnpm 9.15.4, Python 3.13, stable Rust/Cargo, Git, Docker with Po
 
 ## Completion
 All prerequisites installed; clean checkout and frozen dependency install; complete test and audit results; zero unexplained failures; approved risk and migration decisions. If any command fails, record the error and stop promotion. Do not use production to test the candidate.
+
+Run `bash scripts/check-verification-prerequisites.sh` from the checkout to identify missing tools or lockfile. Its success reports prerequisites only. CI permits a non-frozen development install with a warning until a reviewed lockfile exists; it is not release evidence. Once the lockfile is committed, both jobs require frozen installation.
