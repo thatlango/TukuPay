@@ -5,7 +5,7 @@ def row(ref="r1", amount="1000", status="SUCCESSFUL", currency="UGX", environmen
     return dict(reference=ref,amount_minor=amount,status=status,currency=currency,environment=environment,kind=kind,timestamp=timestamp,country="UG",provider="mtn")
 
 def snapshot(transactions, statements, complete=False):
-    return dict(schema_version=1,as_of="2026-11-24T00:00:00Z",window_start="2026-11-10T00:00:00Z",transactions=transactions,statements=statements,complete_daily_history=complete)
+    return dict(schema_version=1,as_of="2026-11-24T00:00:00Z",window_start="2026-11-10T00:00:00Z",transactions=transactions,statements=statements,complete_daily_history=complete,statement_coverage_complete=True)
 
 class IntelligenceTests(unittest.TestCase):
     def test_exact_match_and_mismatch(self):
@@ -32,6 +32,12 @@ class IntelligenceTests(unittest.TestCase):
     def test_unusual_amount(self):
         inputs=[row("r"+str(i)) for i in range(10)]+[row("outlier",amount="6000")]
         self.assertEqual(analyze(snapshot(inputs,inputs))["finding_counts"],{"UNUSUAL_AMOUNT":1})
+    def test_incomplete_statement_export_is_not_missing_evidence(self):
+        data=snapshot([row()],[])
+        data["statement_coverage_complete"]=False
+        report=analyze(data)
+        self.assertEqual(report["finding_counts"],{})
+        self.assertFalse(report["statement_coverage_complete"])
     def test_invalid_input(self):
         for value in ["0","1.0","-1","9223372036854775808",100]:
             with self.assertRaises(ValueError): minor(value)

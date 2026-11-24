@@ -62,8 +62,8 @@ def analyze(snapshot):
                 raise ValueError("invalid row")
             amount = minor(row["amount_minor"])
             timestamp = instant(row["timestamp"])
-            if timestamp > as_of:
-                raise ValueError("future timestamp")
+            if timestamp < begin or timestamp > as_of:
+                raise ValueError("timestamp outside snapshot window")
             if row["status"] not in STATES:
                 raise ValueError("invalid status")
             index[identity(row)].append((row,amount,timestamp))
@@ -87,7 +87,7 @@ def analyze(snapshot):
         if row["status"] in {"CREATED","PENDING","APPROVED"} and as_of-created>=timedelta(minutes=30):
             flag(key,"STALE_PENDING","medium")
         if not b:
-            if row["status"]=="SUCCESSFUL":
+            if row["status"]=="SUCCESSFUL" and snapshot.get("statement_coverage_complete") is True:
                 flag(key,"MISSING_STATEMENT_EVIDENCE","high")
             continue
         other,actual,_ = b[0]
@@ -137,5 +137,5 @@ def analyze(snapshot):
     return {"schema_version":1,"as_of":as_of.isoformat(),"transaction_count":len(internal),
             "statement_count":len(external),"matched_successful":matched,"findings":findings,
             "finding_counts":dict(sorted(Counter(f["code"] for f in findings).items())),
-            "liquidity_baseline":forecasts,"baseline_history_complete":complete,
+            "liquidity_baseline":forecasts,"baseline_history_complete":complete,"statement_coverage_complete":snapshot.get("statement_coverage_complete") is True,
             "decision":"HUMAN_REVIEW_ONLY","limitations":["No automatic fraud classification","No financial status changes","No actual balance or liquidity forecast without funding and settlement data"]}
