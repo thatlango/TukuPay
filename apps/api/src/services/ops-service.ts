@@ -34,8 +34,8 @@ export class OpsService {
       webhookHealth,
       dailyCollections,
     ] = await Promise.all([
-      db.query<{ status: string; count: string; amount_minor: string }>(
-        `SELECT status, count(*)::text, COALESCE(sum(amount_minor),0)::text AS amount_minor
+      db.query<{ status: string; count: string }>(
+        `SELECT status, count(*)::text
            FROM payment_intents
           WHERE created_at >= now() - interval '24 hours'
           GROUP BY status ORDER BY status`,
@@ -47,8 +47,8 @@ export class OpsService {
           GROUP BY status,currency
           ORDER BY currency,status`,
       ),
-      db.query<{ status: string; count: string; amount_minor: string }>(
-        `SELECT status, count(*)::text, COALESCE(sum(amount_minor),0)::text AS amount_minor
+      db.query<{ status: string; count: string }>(
+        `SELECT status, count(*)::text
            FROM payout_requests
           WHERE created_at >= now() - interval '24 hours'
           GROUP BY status ORDER BY status`,
@@ -77,9 +77,8 @@ export class OpsService {
            FROM provider_balance_snapshots
           ORDER BY country_code,provider_code,account_type,currency,captured_at DESC`,
       ),
-      db.query<{ count: string; gross_minor: string; fee_minor: string }>(
-        `SELECT count(*)::text, COALESCE(sum(gross_minor),0)::text AS gross_minor,
-                COALESCE(sum(fee_minor),0)::text AS fee_minor
+      db.query<{ count: string }>(
+        `SELECT count(*)::text
            FROM settlements WHERE settled_at >= now()-interval '24 hours'`,
       ),
       db.query<{ currency: string; count: string; gross_minor: string; fee_minor: string; net_minor: string }>(
@@ -246,6 +245,7 @@ export class OpsService {
     }
 
     return {
+      schemaVersion: 2,
       generatedAt: new Date().toISOString(),
       simulator: simulatorEnabled(),
       payments24h: payments.rows,
@@ -255,7 +255,7 @@ export class OpsService {
       pendingAging: agingRow,
       rails: rails.rows,
       balances: balances.rows,
-      settlements24h: settlements.rows[0] ?? { count: '0', gross_minor: '0', fee_minor: '0' },
+      settlements24h: settlements.rows[0] ?? { count: '0' },
       settlements24hByCurrency: settlementsByCurrency.rows,
       productPerformance7d: productPerformance.rows,
       recentPayments: recentPayments.rows,

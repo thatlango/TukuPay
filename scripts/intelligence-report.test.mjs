@@ -13,3 +13,10 @@ test('reject mixed environment and future report',()=>{
  assert.throws(()=>summarizeIntelligence(report,'simulator',now-86400000));
  assert.equal(summarizeIntelligence(report,'simulator',now+86400000).stale,true);
 });
+
+test('reconciliation preserves ambiguous reference count and exact monetary strings',()=>{
+ const scope={country:'UG',provider:'mtn',currency:'UGX',environment:'simulator',kind:'collection',matched_count:1,ambiguous_reference_count:2,matched_minor:'9223372036854775807',observed_difference_minor:'0'};
+ const view=summarizeIntelligence({...report,reconciliation_by_scope:[scope]},'simulator',now);
+ assert.equal(view.reconciliation[0].ambiguous_reference_count,2);
+ assert.equal(view.reconciliation[0].matched_minor,'9223372036854775807');
+});

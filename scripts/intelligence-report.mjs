@@ -32,7 +32,7 @@ export function summarizeIntelligence(report,env,now=Date.now()) {
     statementComplete:report.statement_coverage_complete===true,
     counts:Object.fromEntries(Object.entries(groups).map(([k,v])=>[k,v.length])),
     findings:pick(groups.findings,['kind','reference','code','severity']),
-    reconciliation:pick(groups.reconciliation,['kind','matched_count','matched_minor','observed_difference_minor']),
+    reconciliation:pick(groups.reconciliation,['kind','matched_count','ambiguous_reference_count','matched_minor','observed_difference_minor']),
     liquidity:pick(groups.liquidity,['mean_daily_payout_minor','seven_day_payout_baseline_minor']),
     funding:pick(groups.funding,['disbursement_balance_minor','seven_day_obligations_minor','funding_gap_minor','evidence']),
     fees:pick(groups.fees,['reference','fee_difference_minor','net_difference_minor','status']),
