@@ -26,6 +26,10 @@ test('candidate checkout clients round-trip mock HTTP and fail closed on missing
     else if (path === '/v3/transfers/3') payload = { status:'success',data:{id:3,reference:'ref-1',currency:'KES',amount:100,status:'SUCCESSFUL',account_number:'fixture-account',bank_code:'fixture-bank'} };
     else if (path === '/v1/payout') payload = { id:'pt-1' };
     else if (path === '/v1/payout/pt-1') payload = { id:'pt-1',client_reference:'ref-1',currency:'XOF',receive_amount:'100',status:'succeeded',mobile:'+221700000000' };
+    else if (path === '/standard/v1/disbursements/') payload = { status:{code:'200'} };
+    else if (path === '/standard/v1/disbursements/ref-1') payload = { data:{transaction:{id:'ref-1',status:'TS',amount:'100',currency:'UGX'}} };
+    else if (path === '/orange-money-webpay/dev/v1/webpayment') payload = { pay_token:'om-1',payment_url:'https://example.invalid/orange' };
+    else if (path === '/orange-money-webpay/dev/v1/transactionstatus') payload = { status:'SUCCESS',order_id:'ref-1' };
     else if (path === '/mpesa/stkpush/v1/processrequest') payload = { ResponseCode: '0', CheckoutRequestID: 'ws_CO_1' };
     else if (path === '/mpesa/stkpushquery/v1/query') payload = { ResultCode: '0', CheckoutRequestID: 'ws_CO_1' };
     else { res.writeHead(404); res.end(); return; }
@@ -62,6 +66,12 @@ test('candidate checkout clients round-trip mock HTTP and fail closed on missing
     assert.equal((await client.queryMpesa(intent,stk.providerId!)).status,'PENDING');
     assert.equal(seen[0]?.body.amount,'10000');
     assert.equal(seen.find(r => r.path.includes('processrequest'))?.body.Amount,100);
+    const airtel = {...payout,currency:'UGX'};
+    assert.equal((await client.initiateAirtelMockPayout(airtel,'256712345678')).status,'PENDING');
+    assert.equal((await client.verifyAirtelMockPayout(airtel)).status,'PENDING');
+    const orange = {...intent,currency:'XOF'};
+    const orangeReceipt = await client.initiateOrangeMockCheckout(orange);
+    assert.equal((await client.verifyOrangeMockCheckout(orange,orangeReceipt.providerId!)).status,'PENDING');
     assert.equal(client.supports('airtel','payout'),false);
     assert.equal(client.supports('orange','collection'),false);
   } finally {

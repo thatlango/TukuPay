@@ -1,3 +1,4 @@
+import { CandidateContractClient } from '../dist/providers/candidates/client.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { MtnMoMoAdapter } from '../dist/providers/mtn.js';
@@ -33,3 +34,12 @@ for (const adapter of [mtn, airtel]) {
 }
 assert.equal(airtel.supportsOperation('UG', 'payout'), false);
 console.log('PyMoMo mock contract checks passed: MTN collections/payouts/duplicate ref/balance; Airtel collections/balance; Airtel payouts disabled.');
+
+const candidate = new CandidateContractClient(process.env.AIRTEL_UG_BASE_URL);
+const mockPayout = {reference:randomUUID(),amount:'1000',currency:'UGX',operation:'payout'};
+assert.equal((await candidate.initiateAirtelMockPayout(mockPayout,'256771234567')).status,'PENDING');
+assert.equal((await candidate.verifyAirtelMockPayout(mockPayout)).status,'PENDING');
+const mockOrange = {reference:randomUUID(),amount:'1000',currency:'XOF',operation:'collection'};
+const orangeReceipt = await candidate.initiateOrangeMockCheckout(mockOrange);
+assert.equal((await candidate.verifyOrangeMockCheckout(mockOrange,orangeReceipt.providerId)).status,'PENDING');
+console.log('PyMoMo candidate fixture checks: Airtel payout and Orange checkout remain pending without approved authoritative evidence.');

@@ -9,7 +9,7 @@ export const CANDIDATE_RAILS = [
   { provider: 'paystack', initialCountry: null, status: 'planned', contractStage: 'mock-checkout-and-payout' },
   { provider: 'flutterwave', initialCountry: null, status: 'planned', contractStage: 'mock-checkout-and-payout' },
   { provider: 'wave', initialCountry: null, status: 'planned', contractStage: 'mock-checkout-and-payout' },
-  { provider: 'orange', initialCountry: null, status: 'planned', contractStage: 'merchant-contract-required' },
+  { provider: 'orange', initialCountry: null, status: 'planned', contractStage: 'mock-checkout-merchant-contract-required' },
 ] as const;
 
 type MarketRow = { country_code: string; provider_code: ProviderCode; environment: string; enabled: boolean };

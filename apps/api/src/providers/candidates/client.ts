@@ -113,6 +113,41 @@ export class CandidateContractClient {
     return verifyCandidatePayout(intent,recipient,root);
   }
 
+  /** PyMoMo fixture paths, not an Airtel merchant-approved PIN/encryption contract. */
+  async initiateAirtelMockPayout(intent: CandidateIntent, phone: string) {
+    if (intent.operation !== 'payout' || intent.currency !== 'UGX' || !/^256[0-9]{9}$/.test(phone)) throw new Error('Invalid mock Airtel intent');
+    majorToMinor(intent.amount,intent.currency);
+    const root = await this.request('/standard/v1/disbursements/', {
+      payee:{msisdn:phone.slice(3)}, reference:intent.reference,
+      transaction:{id:intent.reference,amount:intent.amount,currency:intent.currency,country:'UG'},
+      pin:'SYNTHETIC-FIXTURE-NOT-A-PIN',
+    });
+    if (String(asRecord(root.status).code) !== '200') throw new Error('Airtel mock payout not acknowledged');
+    return candidateReceipt(intent,intent.reference,null);
+  }
+  async verifyAirtelMockPayout(intent: CandidateIntent) {
+    const root = await this.request('/standard/v1/disbursements/'+encodeURIComponent(intent.reference));
+    return verifyCandidate('airtel',intent,root);
+  }
+  /** Orange PyMoMo fixture. The status fixture lacks authoritative money evidence. */
+  async initiateOrangeMockCheckout(intent: CandidateIntent) {
+    if (intent.operation !== 'collection' || intent.currency !== 'XOF') throw new Error('Invalid mock Orange intent');
+    majorToMinor(intent.amount,intent.currency);
+    const root = await this.request('/orange-money-webpay/dev/v1/webpayment',{
+      merchant_key:'synthetic-fixture',currency:intent.currency,order_id:intent.reference,amount:intent.amount,
+      return_url:'https://example.invalid/success',cancel_url:'https://example.invalid/error',
+      notif_url:'https://example.invalid/callback',lang:'en',reference:intent.reference,
+    });
+    if (typeof root.pay_token !== 'string' || !root.pay_token) throw new Error('Orange mock payment token missing');
+    return candidateReceipt(intent,root.pay_token,root.payment_url);
+  }
+  async verifyOrangeMockCheckout(intent: CandidateIntent, token: string) {
+    const root = await this.request('/orange-money-webpay/dev/v1/transactionstatus',{
+      order_id:intent.reference,amount:intent.amount,pay_token:token,
+    });
+    return verifyCandidate('orange',intent,root);
+  }
+
   // The remaining provider contracts are not callable until the actual merchant API
   // schema, encryption/signing requirements and independent financial evidence are reviewed.
   supports(rail: CandidateRail, operation: CandidateIntent['operation']): boolean {

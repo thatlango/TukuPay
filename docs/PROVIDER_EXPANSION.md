@@ -5,12 +5,12 @@ The candidate contract client accepts only HTTP on 127.0.0.1. It cannot use live
 
 | Rail | Implemented in fixture client | Remaining |
 | --- | --- | --- |
-| Airtel Uganda | Explicit fail-closed disbursement boundary | Obtain account-specific disbursement product/version, approved PIN encryption/signing contract, key rotation, request/response and status schemas. |
+| Airtel Uganda | PyMoMo payout initiation/status fixture; fail-closed evidence boundary | Obtain account-specific disbursement product/version, approved PIN encryption/signing contract, key rotation, request/response and status schemas. |
 | M-Pesa Kenya | STK initiation and query | Daraja account OAuth, persist checkout ID, trusted financial amount/receipt evidence, B2C contract and callback handling. STK query alone cannot settle. |
 | Paystack | Hosted checkout, verify, transfer, transfer verify | Merchant account coverage, recipient onboarding, signed webhooks, immutable provider IDs and checkout session persistence. |
 | Flutterwave | Hosted checkout, verify by reference, transfer and transfer lookup | Merchant account/version/market and recipient verification, signed callbacks and hosted checkout integration. |
 | Wave | Checkout, lookup by session ID, payout and payout lookup | Merchant account, optional request signing, callback authentication, reconcile net amount and fees. |
-| Orange Money | Explicit fail-closed contract boundary | Select licensed merchant market, obtain its actual Web Payment API contract and supported operations, verify callback and payment evidence. No generic payout assumed. |
+| Orange Money | PyMoMo checkout/status fixture; fail-closed evidence boundary | Select licensed merchant market, obtain its actual Web Payment API contract and supported operations, verify callback and payment evidence. No generic payout assumed. |
 
 Public reference URLs (reviewed 2026-11-24):
 - Airtel: https://developers.airtel.africa/
@@ -35,3 +35,5 @@ The public portals identify the products, but the current Tuku merchant-account 
 Run pnpm test from root (candidate nested tests explicitly included), then bash scripts/verify-local.sh --pymomo with dependencies available. Candidate tests use synthetic credentials and a loopback HTTP fixture. Review SDK_INTEGRATION.md and OPS_WORKSPACE.md. Workspace is local and not a production deployment.
 
 Release status: development only, no production activation or payment execution.
+
+PyMoMo 1.3.0 pinned mock server exposes Airtel v1 disbursement and Orange Web Payment paths. The new candidate methods exercise those fixtures with synthetic values only. Both stay pending regardless of a successful fixture status. PyMoMo's Airtel helper describes RSA PKCS#1 v1.5 plus Base64 PIN encryption; treat that as a third-party reference, not an approved Airtel Uganda contract. Obtain operator test vectors and current key/signing specifications before implementing production encryption. The independent PyMoMo harness includes these two fixture checks; no real PIN or merchant secret is used.
