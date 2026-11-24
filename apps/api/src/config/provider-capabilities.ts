@@ -1,3 +1,4 @@
+import { balanceAccounts } from './balance-accounts.js';
 import type { ProviderCode } from '../domain/payments.js';
 import { simulatorEnabled, providerRuntimeMode } from './provider-credentials.js';
 import { callbackMode } from '../providers/webhook-policy.js';
@@ -35,12 +36,13 @@ export function describeCapabilities(router: ProviderRouter, rows: MarketRow[]) 
       try { environment = providerRuntimeMode(provider, market.country); } catch { /* unconfigured */ }
       const marketEnabled = environment !== null && rows.some(row => row.country_code === market.country
         && row.provider_code === provider && row.environment === environment && row.enabled);
+      const accounts=balanceAccounts(provider,simulator,balance,payout);
       return { provider, environment, marketEnabled,
         runtime: simulator ? 'simulator' : 'operator',
         collection: { configured: collection, available: marketEnabled && collection },
         payout: { configured: payout, available: marketEnabled && payout &&
           (environment !== 'production' || process.env.TUKUPAY_LIVE_PAYOUTS_ENABLED === 'true') },
-        balance: { configured: balance, available: marketEnabled && balance },
+        balance: { configured: balance, available: marketEnabled && balance, accounts: { collection: {configured:accounts.collection,available:marketEnabled&&accounts.collection}, disbursement:{configured:accounts.disbursement,available:marketEnabled&&accounts.disbursement} } },
         callbacks: environment && marketEnabled ? callbackMode(provider, market.country, environment) : 'disabled',
       };
     }),

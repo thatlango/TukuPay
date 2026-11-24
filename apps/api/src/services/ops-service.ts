@@ -1,3 +1,6 @@
+import { balanceAccounts } from '../config/balance-accounts.js';
+import { isOperationConfigured } from '../config/provider-credentials.js';
+import { TukuPayError } from '../errors.js';
 import { validateBalance } from '../providers/balance-validation.js';
 import { describeCapabilities } from '../config/provider-capabilities.js';
 import { MARKETS } from '../config/markets.js';
@@ -315,7 +318,8 @@ export class OpsService {
     const market = MARKETS[country.toUpperCase()];
     if (!market) throw new Error(`Unsupported market: ${country}`);
     const adapter = this.router.resolveBalance(country.toUpperCase(), provider);
-    if (!adapter.getBalance) throw new Error(`${provider} balance operation is unavailable`);
+    const accounts=balanceAccounts(provider,simulatorEnabled(),Boolean(adapter.getBalance),isOperationConfigured(provider,country.toUpperCase(),'payout'));
+    if (!adapter.getBalance || !accounts[account]) throw new TukuPayError('Requested balance account is unavailable','BALANCE_UNAVAILABLE',503);
 
     const expectedCurrency=providerTransactionCurrency(provider,country.toUpperCase(),market.currency);
     const result = await adapter.getBalance(

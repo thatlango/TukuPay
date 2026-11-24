@@ -58,7 +58,7 @@ export type ProviderCapability = {
   runtime: 'simulator' | 'operator';
   collection: { configured: boolean; available: boolean };
   payout: { configured: boolean; available: boolean };
-  balance: { configured: boolean; available: boolean };
+  balance: { configured: boolean; available: boolean; accounts?: { collection: { configured: boolean; available: boolean }; disbursement: { configured: boolean; available: boolean } } };
   callbacks: 'wake-up-only' | 'disabled';
 };
 export type Capabilities = {
