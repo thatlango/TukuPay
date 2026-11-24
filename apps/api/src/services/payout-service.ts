@@ -1,3 +1,4 @@
+import type { PoolClient } from 'pg';
 import { randomUUID } from 'node:crypto';
 import { getMarket } from '../config/markets.js';
 import { providerRuntimeMode, providerTransactionCurrency, providerUsesOperatorSandbox, simulatorEnabled } from '../config/provider-credentials.js';
@@ -138,6 +139,9 @@ export class PayoutService {
     const market = getMarket(country);
     const adapter = this.router.resolvePayout(country, input.provider);
     const runtimeMode = providerRuntimeMode(adapter.provider, country);
+    if (runtimeMode === 'production' && process.env.TUKUPAY_LIVE_PAYOUTS_ENABLED !== 'true') {
+      throw new TukuPayError('Live payouts are not enabled', 'LIVE_PAYOUT_DISABLED', 503);
+    }
     const operatorSandbox = providerUsesOperatorSandbox(adapter.provider, country);
     const expectedCurrency = providerTransactionCurrency(adapter.provider, country, market.currency);
 
@@ -241,6 +245,9 @@ export class PayoutService {
     }
 
     const runtimeMode = providerRuntimeMode(payout.provider, payout.country);
+    if (runtimeMode === 'production' && process.env.TUKUPAY_LIVE_PAYOUTS_ENABLED !== 'true') {
+      throw new TukuPayError('Live payouts are not enabled', 'LIVE_PAYOUT_DISABLED', 503);
+    }
     const market = await db.query<{ id: string }>(
       `SELECT id FROM provider_markets
         WHERE country_code=$1 AND provider_code=$2 AND environment=$3 AND enabled=TRUE
@@ -375,6 +382,47 @@ export class PayoutService {
     return result.rows.map((row) => row.payout_request_id);
   }
 
+  // Provisional clearing policy: no expense, loan principal, or supplier liability
+  // classification here. The owning product's finance layer allocates the debit.
+  private async ensurePayoutLedger(client: PoolClient, payoutId: string): Promise<void> {
+    const result = await client.query<{
+      amount_minor: string; currency: string; country_code: string; product_code: string; provider_code: ProviderCode;
+    }>(
+      `SELECT amount_minor::text,currency,country_code,product_code,provider_code
+         FROM payout_requests WHERE id=$1 AND status='SUCCESSFUL'`,
+      [payoutId],
+    );
+    const payout = result.rows[0];
+    if (!payout) throw new Error('Successful payout is missing for ledger posting');
+    const journal = await client.query<{ id: string }>(
+      `INSERT INTO journal_entries(reference_type,reference_id,country_code,currency,description)
+       VALUES ('PAYOUT_DISBURSEMENT',$1,$2,$3,$4)
+       ON CONFLICT(reference_type,reference_id) DO NOTHING RETURNING id`,
+      [payoutId, payout.country_code, payout.currency, 'Payout clearing allocation'],
+    );
+    const journalId = journal.rows[0]?.id;
+    if (!journalId) return;
+    const productCode = `PRODUCT:${payout.product_code.toUpperCase()}:${payout.country_code}:${payout.currency}:PAYOUT_CLEARING`;
+    const providerCode = `${payout.provider_code.toUpperCase()}:${payout.country_code}:${payout.currency}:DISBURSEMENT_CLEARING`;
+    const product = await client.query<{ id: string }>(
+      `INSERT INTO ledger_accounts(code,name,account_type,product_code,country_code,currency)
+       VALUES ($1,'Product payout allocation clearing','ASSET',$2,$3,$4)
+       ON CONFLICT(code) DO UPDATE SET name=EXCLUDED.name RETURNING id`,
+      [productCode,payout.product_code,payout.country_code,payout.currency],
+    );
+    const provider = await client.query<{ id: string }>(
+      `INSERT INTO ledger_accounts(code,name,account_type,country_code,currency)
+       VALUES ($1,'Provider disbursement clearing','ASSET',$2,$3)
+       ON CONFLICT(code) DO UPDATE SET name=EXCLUDED.name RETURNING id`,
+      [providerCode,payout.country_code,payout.currency],
+    );
+    await client.query(
+      `INSERT INTO ledger_postings(journal_entry_id,ledger_account_id,side,amount_minor)
+       VALUES ($1,$2,'DEBIT',$4),($1,$3,'CREDIT',$4)`,
+      [journalId,product.rows[0]!.id,provider.rows[0]!.id,payout.amount_minor],
+    );
+  }
+
   private async applyStatus(
     payoutId: string,
     providerReference: string,
@@ -402,6 +450,7 @@ export class PayoutService {
           WHERE id=$1`,
         [payoutId, status],
       );
+      if (status === 'SUCCESSFUL') await this.ensurePayoutLedger(client, payoutId);
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');

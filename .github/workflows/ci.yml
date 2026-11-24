@@ -52,3 +52,10 @@ jobs:
           exit 1
       - name: Simulator end-to-end
         run: node apps/api/scripts/e2e-simulator.mjs
+      - name: Verify simulator journal and payout invariants
+        run: |
+          psql "$DATABASE_URL" -X -qAt -v ON_ERROR_STOP=1 -f database/checks/payment_integrity.sql > /tmp/tukupay-integrity.txt
+          if test -s /tmp/tukupay-integrity.txt; then
+            cat /tmp/tukupay-integrity.txt
+            exit 1
+          fi
