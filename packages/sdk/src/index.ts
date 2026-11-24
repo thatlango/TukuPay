@@ -1,3 +1,5 @@
+import { validCapabilities,validExceptions,validRecovery,validTransport,validOpsSummary,validReview,type DispatchRecovery } from './ops-response.js';
+export type { DispatchRecovery } from './ops-response.js';
 import { validEventBatch, validTransaction, type FinancialEvent } from './response.js';
 export type { FinancialEvent } from './response.js';
 
@@ -186,20 +188,35 @@ export class TukuPayClient {
     if (!validEventBatch(result,this.product)) throw new TukuPayApiError(502,'INVALID_RESPONSE','Invalid financial event response');
     return result;
   }
+  async getDispatchRecovery(): Promise<{records:DispatchRecovery[];policy:string}> {
+    const result=await this.request<unknown>('GET','/v1/ops/dispatch-recovery');
+    if(!validRecovery(result))throw new TukuPayApiError(502,'INVALID_RESPONSE','Invalid recovery response');
+    return result;
+  }
   async getCapabilities(): Promise<Capabilities> {
-    return this.request<Capabilities>('GET','/v1/ops/provider-capabilities');
+    const result=await this.request<Capabilities>('GET','/v1/ops/provider-capabilities');
+    if(!validCapabilities(result))throw new TukuPayApiError(502,'INVALID_RESPONSE','Invalid capabilities response');
+    return result;
   }
   async getExceptions(limit = 50): Promise<{ generatedAt: string; limit: number; exceptions: PaymentException[] }> {
     const bounded = Number.isFinite(limit) ? Math.max(1, Math.min(200, Math.trunc(limit))) : 50;
-    return this.request('GET','/v1/ops/exceptions?limit=' + bounded);
+    const result=await this.request<{ generatedAt:string;limit:number;exceptions:PaymentException[] }>('GET','/v1/ops/exceptions?limit=' + bounded);
+    if(!validExceptions(result))throw new TukuPayApiError(502,'INVALID_RESPONSE','Invalid exceptions response');
+    return result;
   }
   async reviewException(input: { kind: 'collection' | 'payout'; id: string; state: 'OPEN' | 'INVESTIGATING' | 'ESCALATED' | 'REVIEWED'; assignedTo: string | null; note: string; expectedVersion: number }) {
-    return this.request<{ review: Record<string, unknown> }>('POST','/v1/ops/exceptions/review',input);
+    const result=await this.request<{review:Record<string,unknown>}>('POST','/v1/ops/exceptions/review',input);
+    if(!validReview(result))throw new TukuPayApiError(502,'INVALID_RESPONSE','Invalid review response');
+    return result;
   }
   async getOpsSummary(): Promise<{ ops: Record<string, unknown> }> {
-    return this.request('GET','/v1/ops/summary');
+    const result=await this.request<{ops:Record<string,unknown>}>('GET','/v1/ops/summary');
+    if(!validOpsSummary(result))throw new TukuPayApiError(502,'INVALID_RESPONSE','Invalid operations response');
+    return result;
   }
   async getProviderTransport(): Promise<{ startedAt: string; generatedAt: string; scope: 'process-local'; metrics: Record<string, unknown>[] }> {
-    return this.request('GET','/v1/ops/provider-transport');
+    const result=await this.request<{startedAt:string;generatedAt:string;scope:'process-local';metrics:Record<string,unknown>[]}>('GET','/v1/ops/provider-transport');
+    if(!validTransport(result))throw new TukuPayApiError(502,'INVALID_RESPONSE','Invalid transport response');
+    return result;
   }
 }
