@@ -133,6 +133,33 @@ mod tests {
             assert_eq!(actual.is_ok(), f[4]=="allow", "{line}");
         }
     }
+    #[test] fn bounded_money_roundtrip() {
+        for currency in ["UGX","KES","EUR","XOF","USD"] {
+            let c=Currency::parse(currency).unwrap();
+            for minor in [1,9,10,99,100,101,10_000,1_000_000,i64::MAX] {
+                let m=Money::from_minor(c,minor).unwrap();
+                assert_eq!(Money::from_major(c,&m.major()),Ok(m));
+            }
+        }
+        assert!(Currency::parse("ZZZ").is_err());
+        assert!(Money::from_major(Currency::parse("UGX").unwrap(),"9223372036854775808").is_err());
+        assert!(Money::from_major(Currency::parse("KES").unwrap(),"92233720368547758.08").is_err());
+        assert!(Money::from_major(Currency::parse("KES").unwrap(),"1.").is_err());
+    }
+    #[test] fn journal_rejects_unbalanced_or_empty_accounts() {
+        let c=Currency::parse("UGX").unwrap();
+        let a=Money::from_minor(c,100).unwrap();
+        let b=Money::from_minor(c,99).unwrap();
+        assert!(validate_journal(c,&[
+            Posting{account:"clearing",side:Side::Debit,money:a},
+            Posting{account:"customer",side:Side::Credit,money:b},
+        ],None).is_err());
+        assert!(validate_journal(c,&[
+            Posting{account:" ",side:Side::Debit,money:a},
+            Posting{account:"customer",side:Side::Credit,money:a},
+        ],None).is_err());
+        assert!(validate_payout(a,i64::MAX,PayoutLimits{maximum_minor:100,daily_minor:i64::MAX}).is_err());
+    }
     #[test] fn journals_and_states() {
         let c=Currency::parse("UGX").unwrap();
         let m=Money::from_minor(c,100).unwrap();
