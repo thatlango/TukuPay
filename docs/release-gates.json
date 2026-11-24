@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "release": "TukuPay v1.0",
+  "decision": "HOLD",
+  "gates": [
+    {
+      "id": "G01",
+      "name": "Reproducible build and complete test suite",
+      "findings": [
+        "SEC-14"
+      ],
+      "owner": "Engineering",
+      "status": "BLOCKED"
+    },
+    {
+      "id": "G02",
+      "name": "Product and human authorization",
+      "findings": [
+        "SEC-01",
+        "SEC-03",
+        "SEC-04"
+      ],
+      "owner": "Security / Core",
+      "status": "OPEN"
+    },
+    {
+      "id": "G03",
+      "name": "Transaction integrity and recovery",
+      "findings": [
+        "SEC-02",
+        "SEC-07",
+        "SEC-10",
+        "SEC-11"
+      ],
+      "owner": "Engineering / Finance",
+      "status": "OPEN"
+    },
+    {
+      "id": "G04",
+      "name": "Ledger, settlement and wallet integrity",
+      "findings": [
+        "SEC-05",
+        "SEC-06",
+        "SEC-09"
+      ],
+      "owner": "Finance / Engineering",
+      "status": "OPEN"
+    },
+    {
+      "id": "G05",
+      "name": "Provider and API security",
+      "findings": [
+        "SEC-08",
+        "SEC-15",
+        "SEC-16",
+        "SEC-17",
+        "SEC-18"
+      ],
+      "owner": "Security / Engineering",
+      "status": "OPEN"
+    },
+    {
+      "id": "G06",
+      "name": "Data protection and financial reporting",
+      "findings": [
+        "SEC-12",
+        "SEC-19",
+        "SEC-20"
+      ],
+      "owner": "Security / Finance",
+      "status": "OPEN"
+    },
+    {
+      "id": "G07",
+      "name": "Infrastructure isolation and recovery",
+      "findings": [
+        "SEC-13"
+      ],
+      "owner": "Infrastructure",
+      "status": "OPEN"
+    },
+    {
+      "id": "G08",
+      "name": "Independent staging security review and release approval",
+      "findings": [],
+      "owner": "Product owner / Security / Finance",
+      "status": "OPEN"
+    }
+  ]
+}
