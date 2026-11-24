@@ -60,3 +60,6 @@ Native provider signature formats have not been validated. Production unsigned c
 
 ### Provider capability registry
 GET /v1/ops/provider-capabilities (ops:read) exposes actual adapter configuration, matching database market flags, runtime and callback policy for MTN/Airtel. The candidate registry is non-routable: M-Pesa (Kenya first), Paystack, Flutterwave, Wave and Orange. Available flags mean locally configured and enabled, not certified, connected or commercially approved. Payout limits, account and approval checks still apply at dispatch.
+
+## Expansion implementation
+See [Provider expansion](PROVIDER_EXPANSION.md) for the candidate fixture contracts, account-specific blockers and routing gates. The SDK now covers payout and operations methods; see [SDK integration](SDK_INTEGRATION.md). A loopback-only [operations workspace](OPS_WORKSPACE.md) provides provider status and audited exception reviews. All new rails remain unroutable pending validation and commercial activation.

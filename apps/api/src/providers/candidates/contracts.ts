@@ -1,4 +1,4 @@
-import { majorToMinor } from '../utils/money.js';
+import { majorToMinor } from '../../utils/money.js';
 
 export type CandidateRail = 'mpesa' | 'paystack' | 'flutterwave' | 'wave' | 'orange' | 'airtel';
 export type CandidateOperation = 'collection' | 'payout';
