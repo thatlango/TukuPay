@@ -6,7 +6,7 @@ import {
 import type { CountryCode, PaymentStatus, ProviderTransaction } from '../domain/payments.js';
 import { providerMsisdn } from '../utils/msisdn.js';
 import type { PaymentProviderAdapter, ProviderContext } from './types.js';
-import { joinUrl, ProviderHttpError, responsePayload } from './http.js';
+import { joinUrl, providerFetch, ProviderHttpError, responsePayload } from './http.js';
 
 const tokenCache = new Map<string, { token: string; expiresAt: number }>();
 
@@ -47,7 +47,7 @@ export class AirtelMoneyAdapter implements PaymentProviderAdapter {
     if (cache && cache.expiresAt > Date.now() + 60_000) return cache.token;
 
     const credentials = getOperatorCredentials('airtel', country);
-    const response = await fetch(joinUrl(credentials.baseUrl, '/auth/oauth2/token'), {
+    const response = await providerFetch(joinUrl(credentials.baseUrl, '/auth/oauth2/token'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: '*/*' },
       body: JSON.stringify({
@@ -91,7 +91,7 @@ export class AirtelMoneyAdapter implements PaymentProviderAdapter {
       },
     };
 
-    const response = await fetch(
+    const response = await providerFetch(
       joinUrl(credentials.baseUrl, `/merchant/v${credentials.apiVersion}/payments/`),
       {
         method: 'POST',
@@ -125,7 +125,7 @@ export class AirtelMoneyAdapter implements PaymentProviderAdapter {
   ): Promise<{ status: PaymentStatus; raw?: unknown }> {
     const credentials = getOperatorCredentials('airtel', context.country);
     const token = await this.token(context.country);
-    const response = await fetch(
+    const response = await providerFetch(
       joinUrl(credentials.baseUrl, `/standard/v1/payments/${encodeURIComponent(providerReference)}`),
       {
         headers: {
@@ -151,7 +151,7 @@ export class AirtelMoneyAdapter implements PaymentProviderAdapter {
       throw new Error(`Airtel balance endpoint is not configured for ${context.country}`);
     }
     const token = await this.token(context.country);
-    const response = await fetch(joinUrl(credentials.baseUrl, credentials.airtelBalancePath), {
+    const response = await providerFetch(joinUrl(credentials.baseUrl, credentials.airtelBalancePath), {
       headers: {
         Authorization: `Bearer ${token}`,
         Accept: '*/*',

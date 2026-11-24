@@ -6,7 +6,7 @@ import {
 import type { CountryCode, PaymentStatus, ProviderTransaction } from '../domain/payments.js';
 import { providerMsisdn } from '../utils/msisdn.js';
 import type { PaymentProviderAdapter, ProviderContext } from './types.js';
-import { joinUrl, ProviderHttpError, responsePayload } from './http.js';
+import { joinUrl, providerFetch, ProviderHttpError, responsePayload } from './http.js';
 
 type Product = 'collection' | 'disbursement';
 const tokenCache = new Map<string, { token: string; expiresAt: number }>();
@@ -46,7 +46,7 @@ export class MtnMoMoAdapter implements PaymentProviderAdapter {
     if (!subscriptionKey) throw new Error(`MTN ${product} subscription key is not configured for ${country}`);
 
     const basic = Buffer.from(`${credentials.apiUser}:${credentials.apiKey}`).toString('base64');
-    const response = await fetch(joinUrl(credentials.baseUrl, `/${product}/token/`), {
+    const response = await providerFetch(joinUrl(credentials.baseUrl, `/${product}/token/`), {
       method: 'POST',
       headers: {
         Authorization: `Basic ${basic}`,
@@ -81,7 +81,7 @@ export class MtnMoMoAdapter implements PaymentProviderAdapter {
       payeeNote: `${input.product}:${input.externalId}`,
     };
 
-    const response = await fetch(joinUrl(credentials.baseUrl, '/collection/v1_0/requesttopay'), {
+    const response = await providerFetch(joinUrl(credentials.baseUrl, '/collection/v1_0/requesttopay'), {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -104,7 +104,7 @@ export class MtnMoMoAdapter implements PaymentProviderAdapter {
   ): Promise<{ status: PaymentStatus; raw?: unknown }> {
     const credentials = getOperatorCredentials('mtn', context.country);
     const token = await this.token(context.country, 'collection');
-    const response = await fetch(
+    const response = await providerFetch(
       joinUrl(credentials.baseUrl, `/collection/v1_0/requesttopay/${encodeURIComponent(providerReference)}`),
       {
         headers: {
@@ -137,7 +137,7 @@ export class MtnMoMoAdapter implements PaymentProviderAdapter {
       payeeNote: `${input.product}:${input.externalId}`,
     };
 
-    const response = await fetch(joinUrl(credentials.baseUrl, '/disbursement/v1_0/transfer'), {
+    const response = await providerFetch(joinUrl(credentials.baseUrl, '/disbursement/v1_0/transfer'), {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -160,7 +160,7 @@ export class MtnMoMoAdapter implements PaymentProviderAdapter {
   ): Promise<{ status: PaymentStatus; raw?: unknown }> {
     const credentials = getOperatorCredentials('mtn', context.country);
     const token = await this.token(context.country, 'disbursement');
-    const response = await fetch(
+    const response = await providerFetch(
       joinUrl(credentials.baseUrl, `/disbursement/v1_0/transfer/${encodeURIComponent(providerReference)}`),
       {
         headers: {
@@ -187,7 +187,7 @@ export class MtnMoMoAdapter implements PaymentProviderAdapter {
     const subscriptionKey = account === 'collection'
       ? credentials.subscriptionKey
       : credentials.disbursementSubscriptionKey;
-    const response = await fetch(joinUrl(credentials.baseUrl, `/${account}/v1_0/account/balance`), {
+    const response = await providerFetch(joinUrl(credentials.baseUrl, `/${account}/v1_0/account/balance`), {
       headers: {
         Authorization: `Bearer ${token}`,
         'Ocp-Apim-Subscription-Key': subscriptionKey ?? '',
