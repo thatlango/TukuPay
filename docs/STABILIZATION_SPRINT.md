@@ -55,3 +55,19 @@ Commits 66def61dfb776f0647c8230f59bda0fdd16bdd16, fa81db27c3ece9b84a0a576d1696b4
   - response.ts 81215631b03bfbd1dd24bb3668c30b4edd1fc45f
   - response.test.ts 52a25d99bbd88bf6363e1da0d106ac5e2d3dd343
 - Inspected committed route and SDK wiring. Full API and SDK compilation, package-manager execution, HTTP integration and PostgreSQL verification are not established by helper tests. STAB-05 remains open. No production changes or financial requests.
+
+## Request contracts, monetary formatting and reconciliation configuration
+Candidate commits eba9229ca806fb702ffc41b36da8d5a2a7da22c0 and b9363c91f343bcbcc4a2e6bc32a26e02334f7016.
+- Shared collection/payout HTTP create parser validates product, country/currency shape, positive exact amount, provider, reference, optional description and metadata. Optional idempotency keys must be one visible ASCII value without commas, at most 128 characters. Existing service-level provider, environment and authorization checks remain in place; this slice does not alter dispatch or approval semantics.
+- Signed minor-unit formatting now handles negative and zero values exactly, including negative fractional major units. Aggregate display values may exceed a single transaction's signed BIGINT range; majorToMinor still enforces positive bounded transaction amounts.
+- Reconciliation configuration rejects invalid boolean, interval and batch settings rather than allowing invalid timer or query parameters. Batch limits are validated within the service too. This does not implement distributed worker coordination or durable run history.
+- Executed isolated strict TypeScript compilation (tsc 5.8.3, ES2022, NodeNext, strict, noUncheckedIndexedAccess, exactOptionalPropertyTypes) and Node 22.16.0 unit tests. Combined run: 9 passed, zero failed (117.832967 ms). Six test groups are new; three existing money groups rerun. Executed exact Git blobs:
+  - errors.ts bc96773dc3fb8a096c6203ce4e506b10e78b30b5
+  - domain/payments.ts 27986c7b1eeb8e975f3a845a5663dbc102540dc5
+  - config/reconciliation-settings.ts 2299b16e80ba169d8629e9bae5898ba24bb70fab
+  - config/reconciliation-settings.test.ts 5de81312f33d296e882a0d0616f28ce1de527af3
+  - utils/money.ts 529edb4e8b5aab905b6b22d4087d14ff907bb05d
+  - utils/money.test.ts ad56a95dadf6e75354c47f9d975074eda144d5da
+  - utils/create-intent.ts cad784b4f003b7d4dba88272437ed2c0d08a7d77
+  - utils/create-intent.test.ts 98b30bad2f2dfda5632b3c46ee7e857296d64702
+- Full API build, HTTP integration, actual timer operation, PostgreSQL and consumer compatibility remain unverified. No live requests or deployment. STAB-05 and STAB-06 remain open.
