@@ -33,3 +33,22 @@ A product owns its quote, invoice, loan, tenant, order and accounting rules. Tuk
 
 ## Release gates
 Keep draft branches, no production deployment or registry publish. SDK artifact must be built from reviewed exact source and installed in a separate consumer test; no dependency on an absent package. Full API and PostgreSQL tests, Core authorization, product tenant mapping, event consumer idempotency and finance/security acceptance are required. Existing products retain current configuration until controlled cutover. New integration flags default off. A successful SDK unit test is not a live rail certification.
+
+## Sprint 1 execution record — 2026-11-24
+| Package | Issue | Status and artifact |
+|---|---|---|
+| EST-01 | #11 | Candidate SDK 0.2.0 implemented and independently installed; private distribution/registry and consumer lockfiles outstanding. Commit ad7d0e11373c2b5f6f1ae876eeac3d6c1d2b835f. |
+| EST-02 | #12 | [Core draft PR 101](https://github.com/thatlango/Tuku-Core/pull/101), read-only normalized telemetry adapter; catalog activation and identity work outstanding. TukuPay environment field added in e6ed6f4362e90a6c1b2c4ab8a3ed18350c7e33d0. |
+| EST-03 | #13 | [Kela draft PR 40](https://github.com/thatlango/kela/pull/40), interim API binding checks, SDK installation and durable local processing outstanding. |
+| EST-04 | #14 | Actual deferred LendFlow interface inspected; implementation outstanding. |
+| EST-05 | #15 | Units and ImpactOS discovery; implementation outstanding. |
+| EST-06 | #16 | Estate read-only telemetry foundation; other consumers outstanding. |
+| EST-07 | #17 | Isolated verification below; full integration tests outstanding. |
+
+### Verification
+Node 22.16.0, npm 10.9.2, TypeScript 5.8.3. SDK source reconstructed in isolated folder; all source and package configuration hashes match the committed files. Local tsconfig reproduced repository compiler settings with a local typeRoots override; no full monorepo build. ESM and CommonJS compile, 11 SDK unit tests passed, 0 failed. npm pack --ignore-scripts after build generated a private tarball; independent consumer npm install --offline --ignore-scripts --no-audit --no-fund succeeded. Both ESM import and CJS require passed. Package SHA-256 c0e69094b8cadf8c1913451dfb1d611d5eba4389478b8a311a0acd6daa683b51 (8626 bytes; candidate local artifact, not a published registry version).
+SDK added source blob estate.ts cb80ffa0e63690c35eb1555a5de647f98c242bfe, estate.test.ts c3d7e25beea9ea7dd9bd94a9e114d7abb607c869, index.ts 2c901c831780b2aad1a2833720345af0210e3f7d; package.json 20f28ae094e04cf4304563a8631fe599a781c1a3, tsconfig.cjs.json 3fe549e6672a25ea0ccd26f6094e0294a9a8e62f, mark-commonjs.mjs 5091c57588d93422b20d51ed8e60146a46231ba3.
+Core helper strict compilation and three isolated Node checks passed; actual source hash 3c70ebfc230843fa26c01d8bbe48e69fd612195d. Kela helper strict compilation and two isolated Node checks passed; actual source hash ac3ce8e1d3990a9496f1fd4a6c982f2fc6f4f162. Core and Kela Vitest test files committed but not run in their full projects. No cross-service calls or financial transactions. Core and Kela draft PRs initially report mergeable false; review actual branch conflicts or status before any merge.
+
+### Next acceptance
+Provide a controlled private distribution path for the SDK and install the pinned package in Kela and LendFlow; generate consumer lockfiles. Review actual product-specific tenant and obligation scope and implement local transactional deduplication, posting and recovery. Establish independent human approval using the actual Core contract. Verify Core telemetry/catalog and product integration end to end in simulator. Keep all seven issues open; independent coding agents were not launched, as delegation is unavailable. Do not promote or publish this candidate yet.
