@@ -37,6 +37,7 @@ impl Money {
     }
     pub fn from_major(currency: Currency, amount: &str) -> Result<Self, RuleError> {
         let amount = amount.trim();
+        if amount.len() > 64 { return Err(RuleError::Amount); }
         let (whole, frac) = amount.split_once('.').unwrap_or((amount, ""));
         if whole.is_empty() || !whole.bytes().all(|b| b.is_ascii_digit())
             || (amount.contains('.') && (frac.is_empty() || !frac.bytes().all(|b| b.is_ascii_digit()))) {
@@ -98,7 +99,7 @@ pub fn validate_journal(currency: Currency, postings: &[Posting<'_>], expected: 
 pub enum CollectionState { Created, Pending, Successful, Failed, Cancelled, Expired }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PayoutState { ApprovalRequired, Approved, Pending, Successful, Failed, Cancelled }
-/// Strict target policy, not current TypeScript parity: terminal states require
+/// Shared target policy: terminal states require
 /// a separately governed correction workflow, and success requires evidence.
 pub fn collection_transition(from: CollectionState, to: CollectionState, verified: bool) -> Result<(), RuleError> {
     use CollectionState::*;
