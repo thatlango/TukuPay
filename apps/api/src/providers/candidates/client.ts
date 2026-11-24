@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer';
 import { providerFetch, responsePayload } from '../http.js';
 import { majorToMinor } from '../../utils/money.js';
 import { asRecord, candidateReceipt, verifyCandidate, type CandidateIntent, type CandidateRail } from './contracts.js';
@@ -52,9 +53,40 @@ export class CandidateContractClient {
     }
     return verifyCandidate(rail, intent, payload);
   }
+  /** Daraja STK initiation/query only against the local fixture.
+   * Query acknowledgement is not sufficient financial evidence. */
+  async initiateMpesa(input: CandidateIntent & { phone: string }) {
+    if (input.operation !== 'collection' || input.currency !== 'KES' || !/^[1-9][0-9]*$/.test(input.amount)
+      || !/^254[17][0-9]{8}$/.test(input.phone)) throw new Error('Invalid mock STK input');
+    const amount = Number(input.amount);
+    if (!Number.isSafeInteger(amount)) throw new Error('Unsafe STK amount');
+    const timestamp = new Date(Date.now() + 3 * 3600_000).toISOString().replace(/[^0-9]/g, '').slice(0,14);
+    const shortcode = '174379';
+    const password = Buffer.from(shortcode + 'fixture-passkey' + timestamp).toString('base64');
+    const response = await this.request('/mpesa/stkpush/v1/processrequest', {
+      BusinessShortCode: shortcode, Password: password, Timestamp: timestamp,
+      TransactionType: 'CustomerPayBillOnline', Amount: amount, PartyA: input.phone,
+      PartyB: shortcode, PhoneNumber: input.phone, CallBackURL: 'https://example.invalid/callback',
+      AccountReference: input.reference.slice(0,12), TransactionDesc: 'Contract test',
+    });
+    if (String(response.ResponseCode) !== '0' || typeof response.CheckoutRequestID !== 'string' || !response.CheckoutRequestID) {
+      throw new Error('Daraja initiation not acknowledged');
+    }
+    return candidateReceipt(input, response.CheckoutRequestID, null);
+  }
+  async queryMpesa(intent: CandidateIntent, checkoutId: string) {
+    if (!checkoutId || intent.operation !== 'collection' || intent.currency !== 'KES') throw new Error('Invalid STK query');
+    const timestamp = new Date(Date.now() + 3 * 3600_000).toISOString().replace(/[^0-9]/g, '').slice(0,14);
+    const response = await this.request('/mpesa/stkpushquery/v1/query', {
+      BusinessShortCode: '174379', Password: Buffer.from('174379fixture-passkey' + timestamp).toString('base64'),
+      Timestamp: timestamp, CheckoutRequestID: checkoutId,
+    });
+    if (response.CheckoutRequestID !== checkoutId) throw new Error('Daraja checkout ID mismatch');
+    return verifyCandidate('mpesa', intent, response);
+  }
   // The remaining provider contracts are not callable until the actual merchant API
   // schema, encryption/signing requirements and independent financial evidence are reviewed.
   supports(rail: CandidateRail, operation: CandidateIntent['operation']): boolean {
-    return operation === 'collection' && ['paystack', 'flutterwave', 'wave'].includes(rail);
+    return operation === 'collection' && ['paystack', 'flutterwave', 'wave', 'mpesa'].includes(rail);
   }
 }

@@ -5,11 +5,11 @@ import type { ProviderRouter } from '../services/provider-router.js';
 import { MARKETS } from './markets.js';
 
 export const CANDIDATE_RAILS = [
-  { provider: 'mpesa', initialCountry: 'KE', status: 'planned' },
-  { provider: 'paystack', initialCountry: null, status: 'planned' },
-  { provider: 'flutterwave', initialCountry: null, status: 'planned' },
-  { provider: 'wave', initialCountry: null, status: 'planned' },
-  { provider: 'orange', initialCountry: null, status: 'planned' },
+  { provider: 'mpesa', initialCountry: 'KE', status: 'planned', contractStage: 'mock-stk-query' },
+  { provider: 'paystack', initialCountry: null, status: 'planned', contractStage: 'mock-checkout' },
+  { provider: 'flutterwave', initialCountry: null, status: 'planned', contractStage: 'mock-checkout' },
+  { provider: 'wave', initialCountry: null, status: 'planned', contractStage: 'mock-checkout' },
+  { provider: 'orange', initialCountry: null, status: 'planned', contractStage: 'merchant-contract-required' },
 ] as const;
 
 type MarketRow = { country_code: string; provider_code: ProviderCode; environment: string; enabled: boolean };
