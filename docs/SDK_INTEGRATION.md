@@ -16,3 +16,26 @@ The new candidate checkout contracts are not part of the public createPayment AP
 - Provider configuration requires a valid endpoint, compatible mode, explicit supported MSISDN mode when supplied, and supported Airtel API version (v1). MTN sandbox target is sandbox; production target must match the market registry. Confirm operator-specific paths and targets before promotion. Loopback HTTP is permitted for sandbox fixtures only; production requires HTTPS and rejects loopback.
 - Phone validation rejects explicit international scope mismatches and invalid characters but does not establish subscriber ownership or complete national numbering-plan validity.
 - Sensitive request and error logging is minimized in the candidate. Existing stored raw provider payloads are not migrated or deleted; retention, minimization, access controls and log capture tests remain separate release requirements.
+
+## Estate SDK package 0.2.0 (candidate)
+Build at repository root: pnpm --filter @tuku/pay-sdk build. Package from packages/sdk: npm pack --ignore-scripts after successful build and test. The private package supports both ESM import and CommonJS require; no external runtime dependencies. Install the reviewed tarball through the product's package manager or an approved private registry. Do not publish or install from a moving branch. Keep version and integrity pinned; consumer lockfile must be generated and reviewed in the consumer repository.
+
+Server configuration: TUKUPAY_ENABLED=false by default; set true only in authorized environments. TUKUPAY_BASE_URL, TUKUPAY_TOKEN, optional TUKUPAY_TIMEOUT_MS (1000–60000, default 12000). Use the product code as a fixed application constant, not user input. Example:
+
+```ts
+import { createEstateClient, assertSuccessfulCollection } from '@tuku/pay-sdk';
+const pay = createEstateClient('kela');
+// Initialize once in the server-side payment service. If null, integration is disabled.
+// Persist the obligation and a stable idempotency key before creation.
+// After reading the authoritative payment by its persisted ID:
+if (pay) {
+  // binding is read from the local immutable obligation, never reconstructed from the response.
+  const payment = await pay.getPayment(binding.paymentId);
+  assertSuccessfulCollection(payment, binding);
+  // Product still owns idempotent local posting/fulfillment and durable event processing.
+}
+```
+
+The guard matches payment ID, product, external reference, country, currency, exact decimal amount, optional provider, successful status and presence of provider reference. It does not authenticate independent bank evidence, check beneficiary ownership, authorize posting or replace product tenant controls. The SDK validates response shapes; products retain their own domain ledger. HTTP fallback uses the documented /v1 endpoints and the same binding checks.
+
+Core telemetry: GET /internal/estate-telemetry returns schemaVersion 2, productCode tukupay, financialEnvironment and currency-separated minor-unit strings. Core must reject a mismatched environment. No event ingress, entitlement, or notification activation is implied.

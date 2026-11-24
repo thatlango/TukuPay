@@ -1,3 +1,4 @@
+import { configuredEnvironment } from '../config/financial-environment.js';
 import { boundedInteger } from '../utils/request-validation.js';
 import { timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
@@ -52,6 +53,7 @@ export async function registerInternalRoutes(
     return {
       productCode: 'tukupay',
       schemaVersion: 2,
+      financialEnvironment: configuredEnvironment(),
       amountsByCurrency: row.amounts_by_currency ?? [],
       generatedAt: new Date().toISOString(),
       kpis: {
