@@ -49,3 +49,5 @@ bash scripts/verify-local.sh --pymomo
 ```
 
 Completion: exit code zero and PASS output, plus successful PyMoMo contract output for the full release gate. Save terminal output and commit SHA as evidence. A run without --pymomo does not satisfy the external contract gate. Dependency installation is not lockfile reproducible yet; resolve and review the dependency lock before production release.
+
+Idempotency now checks normalized financial details and metadata, not just the key. Reused identifiers with changed intent or two conflicting records return HTTP 409. Simulator routing no longer includes real provider adapters; keep its database and credentials separate from operator environments.

@@ -40,6 +40,8 @@ assert(result.payload.payment.status === 'PENDING', 'payment should start PENDIN
 
 result = await call('POST', '/v1/payments', kela, paymentBody, `pay-${stamp}`);
 assert(result.payload.payment.id === paymentId, 'idempotent payment must return same id');
+const conflict = await call('POST', '/v1/payments', kela, { ...paymentBody, money: { amount: '2600', currency: 'UGX' } }, `pay-${stamp}`);
+assert(conflict.response.status === 409, 'changed amount must not silently reuse an existing payment');
 
 result = await call('POST', `/v1/payments/${paymentId}/refresh`, kela);
 assert(result.payload.payment.status === 'SUCCESSFUL', 'simulated payment should become SUCCESSFUL');
@@ -89,6 +91,8 @@ result = await call('POST', '/v1/payouts', admin, payoutBody, `payout-${stamp}`)
 assert(result.response.status === 201 && result.payload.payout.status === 'APPROVAL_REQUIRED', 'payout must require approval');
 const payoutId = result.payload.payout.id;
 assert(!result.payload.payout.providerReference, 'unapproved payout must not be dispatched');
+const payoutConflict = await call('POST', '/v1/payouts', admin, { ...payoutBody, money: { amount: '2600', currency: 'UGX' } }, `payout-${stamp}`);
+assert(payoutConflict.response.status === 409, 'changed payout amount must be rejected');
 const approvals = await Promise.all([0, 1].map(() => call('POST', `/v1/payouts/${payoutId}/approve`, admin, { reason: 'Simulator test only' })));
 assert(approvals.every(a => a.response.ok), 'concurrent approvals must be idempotent');
 result = await call('GET', `/v1/payouts/${payoutId}`, admin);

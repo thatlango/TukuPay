@@ -29,7 +29,6 @@ const adapters = simulatorEnabled()
   ? [
       new SimulatedProviderAdapter('mtn'),
       new SimulatedProviderAdapter('airtel'),
-      ...realAdapters,
     ]
   : realAdapters;
 

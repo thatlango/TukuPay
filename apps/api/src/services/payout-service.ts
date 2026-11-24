@@ -1,3 +1,4 @@
+import { assertSameIntent } from './idempotency.js';
 import type { PoolClient } from 'pg';
 import { randomUUID } from 'node:crypto';
 import { getMarket } from '../config/markets.js';
@@ -124,9 +125,12 @@ export class PayoutService {
       `SELECT id FROM payout_requests
         WHERE product_code = $1
           AND (external_id = $2 OR ($3::text IS NOT NULL AND idempotency_key = $3))
-        ORDER BY created_at DESC LIMIT 1`,
+        ORDER BY created_at DESC LIMIT 2`,
       [product, externalId, idempotencyKey ?? null],
     );
+    if (result.rows.length > 1) {
+      throw new TukuPayError('External ID and idempotency key identify different requests', 'IDEMPOTENCY_CONFLICT', 409);
+    }
     return result.rows[0] ? this.getById(result.rows[0].id) : null;
   }
 
@@ -153,14 +157,15 @@ export class PayoutService {
       );
     }
 
-    const existing = await this.findExisting(product, externalId, idempotencyKey);
-    if (existing) return existing;
-
     const amountMinor = majorToMinor(amount, currency);
     const rawPhone = required(input.phone, 'phone');
     const phone = operatorSandbox
       ? normalizeSandboxMsisdn(rawPhone)
       : normalizeMsisdn(rawPhone, country);
+    const intent = { product, externalId, country, provider: adapter.provider, amount, currency, phone,
+      description: input.description ?? null, metadata: input.metadata ?? {} };
+    const existing = await this.findExisting(product, externalId, idempotencyKey);
+    if (existing) return assertSameIntent(existing, intent);
     const id = randomUUID();
 
     try {
@@ -178,7 +183,7 @@ export class PayoutService {
     } catch (error) {
       if ((error as { code?: string }).code === '23505') {
         const raced = await this.findExisting(product, externalId, idempotencyKey);
-        if (raced) return raced;
+        if (raced) return assertSameIntent(raced, intent);
       }
       throw error;
     }
