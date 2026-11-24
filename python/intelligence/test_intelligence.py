@@ -44,6 +44,17 @@ class IntelligenceTests(unittest.TestCase):
         self.assertEqual(ugx["observed_difference_minor"],"1")
         self.assertEqual(ugx["matched_minor"],"0")
         self.assertEqual(len(report["reconciliation_by_scope"]),2)
+    def test_ambiguous_duplicates_excluded_from_both_scope_totals(self):
+        for internal, external in (([row(),row()],[row()]),([row()],[row(),row()])):
+            report=analyze(snapshot(internal+[row("r2",amount="50")],external+[row("r2",amount="50")]))
+            scope=report["reconciliation_by_scope"][0]
+            self.assertEqual(scope["ambiguous_reference_count"],1)
+            self.assertEqual(scope["internal_success_minor"],"50")
+            self.assertEqual(scope["statement_success_minor"],"50")
+            self.assertEqual(scope["observed_difference_minor"],"0")
+            self.assertEqual(report["finding_counts"],{"DUPLICATE_REFERENCE":1})
+            self.assertEqual(report["matched_successful"],1)
+
     def test_invalid_input(self):
         for value in ["0","1.0","-1","9223372036854775808",100]:
             with self.assertRaises(ValueError): minor(value)

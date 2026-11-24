@@ -81,11 +81,12 @@ def analyze(snapshot):
         group=totals[key[:5]]
         group['internal_rows']+=len(a)
         group['statement_rows']+=len(b)
-        if len(a)==1 and a[0][0]['status']=='SUCCESSFUL': group['internal_success_minor']+=a[0][1]
-        if len(b)==1 and b[0][0]['status']=='SUCCESSFUL': group['statement_success_minor']+=b[0][1]
         if len(a)>1 or len(b)>1:
+            group['ambiguous_reference_count']+=1
             flag(key,"DUPLICATE_REFERENCE","high")
             continue
+        if len(a)==1 and a[0][0]['status']=='SUCCESSFUL': group['internal_success_minor']+=a[0][1]
+        if len(b)==1 and b[0][0]['status']=='SUCCESSFUL': group['statement_success_minor']+=b[0][1]
         if not a:
             flag(key,"UNMATCHED_STATEMENT","high")
             continue
@@ -150,6 +151,7 @@ def analyze(snapshot):
         country,provider,currency,environment,kind=key
         summary.append(dict(country=country,provider=provider,currency=currency,environment=environment,kind=kind,
                             internal_rows=values["internal_rows"],statement_rows=values["statement_rows"],matched_count=values["matched_count"],
+                            ambiguous_reference_count=values["ambiguous_reference_count"],
                             internal_success_minor=str(values["internal_success_minor"]),statement_success_minor=str(values["statement_success_minor"]),
                             matched_minor=str(values["matched_minor"]),observed_difference_minor=str(values["internal_success_minor"]-values["statement_success_minor"])))
     return {"reconciliation_by_scope":summary,"schema_version":1,"as_of":as_of.isoformat(),"transaction_count":len(internal),
