@@ -24,6 +24,13 @@ function assert(condition, message) {
 const preflight = await call('GET', '/v1/ops/summary', admin);
 assert(preflight.response.ok && preflight.payload.ops.simulator === true, 'Refusing to run financial E2E outside simulator mode');
 
+const capabilities = await call('GET', '/v1/ops/provider-capabilities', admin);
+assert(capabilities.response.ok && capabilities.payload.simulator === true, 'capabilities must report simulator runtime');
+const uganda = capabilities.payload.markets.find(market => market.country === 'UG');
+assert(uganda.providers.some(rail => rail.provider === 'mtn' && rail.collection.available), 'Uganda simulator collection must be available');
+assert(capabilities.payload.candidates.every(rail => rail.status === 'planned'), 'candidate providers are not routable');
+assert((await call('GET', '/v1/ops/provider-capabilities', kela)).response.status === 403, 'ops capabilities are scoped');
+
 const stamp = Date.now();
 const paymentBody = {
   product: 'kela',

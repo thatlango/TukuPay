@@ -57,3 +57,6 @@ Product requests now need the matching service identity or explicit `products:<c
 
 ### Callback ingress
 Native provider signature formats have not been validated. Production unsigned collection callbacks are disabled unless the exact market has `<PROVIDER>_<COUNTRY>_UNSIGNED_CALLBACKS_ENABLED=true` after ingress/security review. Polling remains the authoritative path. Sandbox callbacks are wake-up hints only. Unknown or already terminal references are ignored; stored events contain reference and wake-up marker only, not callback payload/signature. Duplicate hints are coalesced, and reconciliation polling provides fallback. Native signature verification and payout callback support remain future contract-dependent work.
+
+### Provider capability registry
+GET /v1/ops/provider-capabilities (ops:read) exposes actual adapter configuration, matching database market flags, runtime and callback policy for MTN/Airtel. The candidate registry is non-routable: M-Pesa (Kenya first), Paystack, Flutterwave, Wave and Orange. Available flags mean locally configured and enabled, not certified, connected or commercially approved. Payout limits, account and approval checks still apply at dispatch.

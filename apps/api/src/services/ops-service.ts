@@ -1,3 +1,4 @@
+import { describeCapabilities } from '../config/provider-capabilities.js';
 import { MARKETS } from '../config/markets.js';
 import { simulatorEnabled } from '../config/provider-credentials.js';
 import { db } from '../db/pool.js';
@@ -6,6 +7,13 @@ import { ProviderRouter } from './provider-router.js';
 
 export class OpsService {
   constructor(private readonly router: ProviderRouter) {}
+
+  async capabilities() {
+    const result = await db.query<{ country_code: string; provider_code: ProviderCode; environment: string; enabled: boolean }>(
+      'SELECT country_code,provider_code,environment,enabled FROM provider_markets',
+    );
+    return describeCapabilities(this.router, result.rows);
+  }
 
   async summary(): Promise<Record<string, unknown>> {
     const [

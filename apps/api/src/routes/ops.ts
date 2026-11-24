@@ -11,6 +11,8 @@ export async function registerOpsRoutes(
   ops: OpsService,
   settlements: SettlementService,
 ): Promise<void> {
+  app.get('/v1/ops/provider-capabilities', { preHandler: requireScopes('ops:read') }, async () => ops.capabilities());
+
   app.get('/v1/ops/provider-transport', { preHandler: requireScopes('ops:read') }, async () => transportMetrics.snapshot());
 
   app.get('/v1/ops/exceptions', { preHandler: requireScopes('ops:read') }, async (request) => {
