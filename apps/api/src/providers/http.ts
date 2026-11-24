@@ -1,3 +1,4 @@
+import { transportMetrics, type TransportScope } from './telemetry.js';
 export class ProviderHttpError extends Error {
   constructor(
     readonly provider: string,
@@ -26,7 +27,7 @@ export function retryDelay(value: string | null, attempt: number, now = Date.now
 }
 
 /** Read-only retries. Financial writes and token requests are never replayed here. */
-export async function providerFetch(url: string, init: RequestInit = {}): Promise<Response> {
+export async function providerFetch(url: string, init: RequestInit = {}, scope?: TransportScope): Promise<Response> {
   const target = new URL(url);
   const local = ['localhost', '127.0.0.1', '[::1]'].includes(target.hostname);
   if (target.username || target.password || (target.protocol !== 'https:' && !(local && target.protocol === 'http:'))) {
@@ -36,6 +37,7 @@ export async function providerFetch(url: string, init: RequestInit = {}): Promis
   const safe = ['GET', 'HEAD', 'OPTIONS'].includes(method);
   for (let attempt = 0; ; attempt += 1) {
     let response: Response;
+    const started = performance.now();
     try {
       const timeout = AbortSignal.timeout(15_000);
       response = await fetch(target, {
@@ -44,10 +46,15 @@ export async function providerFetch(url: string, init: RequestInit = {}): Promis
         signal: init.signal ? AbortSignal.any([init.signal, timeout]) : timeout,
       });
     } catch (error) {
+      if (scope) transportMetrics.record({ scope, outcome: error instanceof Error && error.name === 'TimeoutError' ? 'timeout' : 'network_error',
+        status: null, durationMs: performance.now() - started, retry: attempt > 0 });
       if (!safe || attempt >= 2 || init.signal?.aborted) throw error;
       await new Promise(resolve => setTimeout(resolve, retryDelay(null, attempt)));
       continue;
     }
+    if (scope) transportMetrics.record({ scope,
+      outcome: response.status >= 300 && response.status < 400 ? 'redirect' : response.ok ? 'ok' : 'http_error',
+      status: response.status, durationMs: performance.now() - started, retry: attempt > 0 });
     if (response.status >= 300 && response.status < 400) {
       await response.body?.cancel();
       throw new Error('Provider redirect rejected');

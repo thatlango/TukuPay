@@ -1,3 +1,4 @@
+import type { TransportScope } from './telemetry.js';
 import { createHash } from 'node:crypto';
 import { providerFetch } from './http.js';
 
@@ -52,13 +53,14 @@ export async function authorizedProviderFetch(
   load: () => Promise<Token>,
   url: string,
   init: RequestInit = {},
+  scope?: TransportScope,
 ): Promise<Response> {
   const safe = ['GET', 'HEAD', 'OPTIONS'].includes((init.method ?? 'GET').toUpperCase());
   for (let attempt = 0; ; attempt++) {
     const token = await cache.get(key, load);
     const headers = new Headers(init.headers);
     headers.set('Authorization', `Bearer ${token}`);
-    const response = await providerFetch(url, { ...init, headers });
+    const response = await providerFetch(url, { ...init, headers }, scope);
     if (response.status !== 401) return response;
     cache.invalidate(key, token);
     // A financial write is never replayed, even on an authentication error.

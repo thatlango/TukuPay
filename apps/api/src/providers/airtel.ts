@@ -1,3 +1,4 @@
+import type { TransportScope } from './telemetry.js';
 import { getMarket } from '../config/markets.js';
 import {
   getOperatorCredentials,
@@ -43,7 +44,7 @@ export class AirtelMoneyAdapter implements PaymentProviderAdapter {
     return Boolean(credentials.airtelBalancePath);
   }
 
-  private async authorizedFetch(country: CountryCode, url: string, init: RequestInit = {}): Promise<Response> {
+  private async authorizedFetch(country: CountryCode, url: string, init: RequestInit = {}, operation: TransportScope['operation'] = 'status'): Promise<Response> {
     const credentials = getOperatorCredentials('airtel', country);
     const key = credentialKey(['airtel', country, credentials.baseUrl, credentials.mode, credentials.clientId, credentials.clientSecret]);
     return authorizedProviderFetch(tokenCache, key, async () => {
@@ -55,13 +56,13 @@ export class AirtelMoneyAdapter implements PaymentProviderAdapter {
           client_secret: credentials.clientSecret,
           grant_type: 'client_credentials',
         }),
-      });
+      }, { provider: 'airtel', country, operation: 'token' });
       const payload = await responsePayload(response);
       if (!response.ok) {
         throw new ProviderHttpError('airtel', response.status, 'Token acquisition rejected');
       }
       return parseToken(payload);
-    }, url, init);
+    }, url, init, { provider: 'airtel', country, operation });
   }
 
   async collect(
@@ -97,7 +98,7 @@ export class AirtelMoneyAdapter implements PaymentProviderAdapter {
           'X-Currency': context.currency,
         },
         body: JSON.stringify(body),
-      },
+      }, 'collection',
     );
     const payload = await responsePayload(response);
     if (!response.ok) {
@@ -148,7 +149,7 @@ export class AirtelMoneyAdapter implements PaymentProviderAdapter {
         'X-Country': context.country,
         'X-Currency': context.currency,
       },
-    });
+    }, 'balance');
     const payload = await responsePayload(response);
     if (!response.ok) throw new ProviderHttpError('airtel', response.status, JSON.stringify(payload));
     const root = payload as { data?: { balance?: unknown }; balance?: unknown; currency?: unknown };

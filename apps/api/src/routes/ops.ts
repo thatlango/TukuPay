@@ -1,3 +1,4 @@
+import { transportMetrics } from '../providers/telemetry.js';
 import type { FastifyInstance } from 'fastify';
 import { identifyService, requireScopes } from '../auth/service-auth.js';
 import type { ProviderCode } from '../domain/payments.js';
@@ -10,6 +11,8 @@ export async function registerOpsRoutes(
   ops: OpsService,
   settlements: SettlementService,
 ): Promise<void> {
+  app.get('/v1/ops/provider-transport', { preHandler: requireScopes('ops:read') }, async () => transportMetrics.snapshot());
+
   app.get('/v1/ops/summary', { preHandler: requireScopes('ops:read') }, async () => ({
     ops: await ops.summary(),
   }));

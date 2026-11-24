@@ -1,3 +1,4 @@
+import type { TransportScope } from './telemetry.js';
 import { getMarket } from '../config/markets.js';
 import {
   getOperatorCredentials,
@@ -35,7 +36,7 @@ export class MtnMoMoAdapter implements PaymentProviderAdapter {
     return isOperationConfigured('mtn', country, 'collection');
   }
 
-  private async authorizedFetch(country: CountryCode, product: Product, url: string, init: RequestInit = {}): Promise<Response> {
+  private async authorizedFetch(country: CountryCode, product: Product, url: string, init: RequestInit = {}, operation: TransportScope['operation'] = 'status'): Promise<Response> {
     const credentials = getOperatorCredentials('mtn', country);
     const subscriptionKey = product === 'collection'
       ? credentials.subscriptionKey
@@ -51,11 +52,11 @@ export class MtnMoMoAdapter implements PaymentProviderAdapter {
           Authorization: `Basic ${basic}`,
           'Ocp-Apim-Subscription-Key': subscriptionKey,
         },
-      });
+      }, { provider: 'mtn', country, operation: 'token' });
       const payload = await responsePayload(response);
       if (!response.ok) throw new ProviderHttpError('mtn', response.status, 'Token acquisition rejected');
       return parseToken(payload);
-    }, url, init);
+    }, url, init, { provider: 'mtn', country, operation });
   }
 
   async collect(
@@ -85,7 +86,7 @@ export class MtnMoMoAdapter implements PaymentProviderAdapter {
         'X-Callback-Url': callbackUrl,
       },
       body: JSON.stringify(body),
-    });
+    }, 'collection');
     const payload = await responsePayload(response);
     if (response.status !== 202) throw new ProviderHttpError('mtn', response.status, JSON.stringify(payload));
     return { provider: 'mtn', country: context.country, providerReference, status: 'PENDING', raw: payload };
@@ -137,7 +138,7 @@ export class MtnMoMoAdapter implements PaymentProviderAdapter {
         'X-Callback-Url': callbackUrl,
       },
       body: JSON.stringify(body),
-    });
+    }, 'payout');
     const payload = await responsePayload(response);
     if (response.status !== 202) throw new ProviderHttpError('mtn', response.status, JSON.stringify(payload));
     return { provider: 'mtn', country: context.country, providerReference, status: 'PENDING', raw: payload };
@@ -178,7 +179,7 @@ export class MtnMoMoAdapter implements PaymentProviderAdapter {
         'Ocp-Apim-Subscription-Key': subscriptionKey ?? '',
         'X-Target-Environment': credentials.targetEnvironment ?? 'sandbox',
       },
-    });
+    }, 'balance');
     const payload = await responsePayload(response);
     if (!response.ok) throw new ProviderHttpError('mtn', response.status, JSON.stringify(payload));
     const data = payload as { availableBalance?: unknown; currency?: unknown };
