@@ -1,11 +1,23 @@
+import { balanceAccounts } from '../config/balance-accounts.js';
+import { isOperationConfigured } from '../config/provider-credentials.js';
+import { TukuPayError } from '../errors.js';
+import { validateBalance } from '../providers/balance-validation.js';
+import { describeCapabilities } from '../config/provider-capabilities.js';
 import { MARKETS } from '../config/markets.js';
-import { simulatorEnabled } from '../config/provider-credentials.js';
+import { simulatorEnabled, providerTransactionCurrency } from '../config/provider-credentials.js';
 import { db } from '../db/pool.js';
 import type { ProviderCode } from '../domain/payments.js';
 import { ProviderRouter } from './provider-router.js';
 
 export class OpsService {
   constructor(private readonly router: ProviderRouter) {}
+
+  async capabilities() {
+    const result = await db.query<{ country_code: string; provider_code: ProviderCode; environment: string; enabled: boolean }>(
+      'SELECT country_code,provider_code,environment,enabled FROM provider_markets',
+    );
+    return describeCapabilities(this.router, result.rows);
+  }
 
   async summary(): Promise<Record<string, unknown>> {
     const [
@@ -25,8 +37,8 @@ export class OpsService {
       webhookHealth,
       dailyCollections,
     ] = await Promise.all([
-      db.query<{ status: string; count: string; amount_minor: string }>(
-        `SELECT status, count(*)::text, COALESCE(sum(amount_minor),0)::text AS amount_minor
+      db.query<{ status: string; count: string }>(
+        `SELECT status, count(*)::text
            FROM payment_intents
           WHERE created_at >= now() - interval '24 hours'
           GROUP BY status ORDER BY status`,
@@ -38,8 +50,8 @@ export class OpsService {
           GROUP BY status,currency
           ORDER BY currency,status`,
       ),
-      db.query<{ status: string; count: string; amount_minor: string }>(
-        `SELECT status, count(*)::text, COALESCE(sum(amount_minor),0)::text AS amount_minor
+      db.query<{ status: string; count: string }>(
+        `SELECT status, count(*)::text
            FROM payout_requests
           WHERE created_at >= now() - interval '24 hours'
           GROUP BY status ORDER BY status`,
@@ -63,14 +75,13 @@ export class OpsService {
            FROM provider_markets ORDER BY country_code,provider_code,environment`,
       ),
       db.query<{ country_code: string; provider_code: ProviderCode; account_type: string; available_major: string; currency: string; simulated: boolean; captured_at: Date }>(
-        `SELECT DISTINCT ON (country_code,provider_code,account_type)
+        `SELECT DISTINCT ON (country_code,provider_code,account_type,currency)
            country_code,provider_code,account_type,available_major,currency,simulated,captured_at
            FROM provider_balance_snapshots
-          ORDER BY country_code,provider_code,account_type,captured_at DESC`,
+          ORDER BY country_code,provider_code,account_type,currency,captured_at DESC`,
       ),
-      db.query<{ count: string; gross_minor: string; fee_minor: string }>(
-        `SELECT count(*)::text, COALESCE(sum(gross_minor),0)::text AS gross_minor,
-                COALESCE(sum(fee_minor),0)::text AS fee_minor
+      db.query<{ count: string }>(
+        `SELECT count(*)::text
            FROM settlements WHERE settled_at >= now()-interval '24 hours'`,
       ),
       db.query<{ currency: string; count: string; gross_minor: string; fee_minor: string; net_minor: string }>(
@@ -237,6 +248,7 @@ export class OpsService {
     }
 
     return {
+      schemaVersion: 2,
       generatedAt: new Date().toISOString(),
       simulator: simulatorEnabled(),
       payments24h: payments.rows,
@@ -246,7 +258,7 @@ export class OpsService {
       pendingAging: agingRow,
       rails: rails.rows,
       balances: balances.rows,
-      settlements24h: settlements.rows[0] ?? { count: '0', gross_minor: '0', fee_minor: '0' },
+      settlements24h: settlements.rows[0] ?? { count: '0' },
       settlements24hByCurrency: settlementsByCurrency.rows,
       productPerformance7d: productPerformance.rows,
       recentPayments: recentPayments.rows,
@@ -260,6 +272,44 @@ export class OpsService {
     };
   }
 
+  /** Read-only queue: do not expose raw provider payloads or customer details. */
+  async exceptions(limit = 50): Promise<Record<string, unknown>> {
+    const bounded = Number.isFinite(limit) ? Math.max(1, Math.min(200, Math.trunc(limit))) : 50;
+    const result = await db.query(
+      `WITH pending AS (
+        SELECT 'collection' AS kind,pi.id,pi.product_code,pi.country_code,pm.provider_code,
+               pi.currency,pi.status,pi.created_at,pt.last_checked_at,pt.attempts,
+               pt.last_error IS NOT NULL AS has_error
+          FROM payment_intents pi
+          JOIN LATERAL (
+            SELECT * FROM provider_transactions WHERE payment_intent_id=pi.id
+             ORDER BY created_at DESC LIMIT 1
+          ) pt ON TRUE
+          JOIN provider_markets pm ON pm.id=pt.provider_market_id
+         WHERE pi.status IN ('CREATED','PENDING')
+        UNION ALL
+        SELECT 'payout',pr.id,pr.product_code,pr.country_code,pr.provider_code,
+               pr.currency,pr.status,pr.created_at,pt.last_checked_at,coalesce(pt.attempts,0),
+               pt.last_error IS NOT NULL
+          FROM payout_requests pr
+          LEFT JOIN LATERAL (
+            SELECT * FROM provider_payout_transactions WHERE payout_request_id=pr.id
+             ORDER BY created_at DESC LIMIT 1
+          ) pt ON TRUE
+         WHERE pr.status IN ('APPROVED','PENDING')
+      )
+      SELECT pending.*,review.state AS review_state,review.assigned_to,review.updated_at AS review_updated_at,
+             coalesce(review.version,0) AS review_version,CASE WHEN has_error THEN 'PROVIDER_ERROR'
+                    WHEN status='APPROVED' THEN 'AWAITING_DISPATCH'
+                    ELSE 'STALE_PENDING' END AS reason
+        FROM pending LEFT JOIN payment_exception_reviews review ON review.kind=pending.kind AND review.transaction_id=pending.id
+       WHERE has_error OR created_at < now()-interval '30 minutes'
+       ORDER BY has_error DESC,created_at ASC,pending.id LIMIT $1`,
+      [bounded],
+    );
+    return { generatedAt: new Date().toISOString(), limit: bounded, exceptions: result.rows };
+  }
+
   async captureBalance(
     provider: ProviderCode,
     country: string,
@@ -268,12 +318,15 @@ export class OpsService {
     const market = MARKETS[country.toUpperCase()];
     if (!market) throw new Error(`Unsupported market: ${country}`);
     const adapter = this.router.resolveBalance(country.toUpperCase(), provider);
-    if (!adapter.getBalance) throw new Error(`${provider} balance operation is unavailable`);
+    const accounts=balanceAccounts(provider,simulatorEnabled(),Boolean(adapter.getBalance),isOperationConfigured(provider,country.toUpperCase(),'payout'));
+    if (!adapter.getBalance || !accounts[account]) throw new TukuPayError('Requested balance account is unavailable','BALANCE_UNAVAILABLE',503);
 
+    const expectedCurrency=providerTransactionCurrency(provider,country.toUpperCase(),market.currency);
     const result = await adapter.getBalance(
-      { country: country.toUpperCase(), currency: market.currency },
+      { country: country.toUpperCase(), currency: expectedCurrency },
       account,
     );
+    const verified = validateBalance(result.available,result.currency,expectedCurrency);
     const simulated = simulatorEnabled();
     const saved = await db.query<{ id: string; captured_at: Date }>(
       `INSERT INTO provider_balance_snapshots
@@ -281,7 +334,7 @@ export class OpsService {
        VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)
        RETURNING id,captured_at`,
       [
-        country.toUpperCase(), provider, account, result.available, result.currency,
+        country.toUpperCase(), provider, account, verified.available, verified.currency,
         simulated, JSON.stringify(result.raw ?? null),
       ],
     );
@@ -290,8 +343,8 @@ export class OpsService {
       country: country.toUpperCase(),
       provider,
       account,
-      available: result.available,
-      currency: result.currency,
+      available: verified.available,
+      currency: verified.currency,
       simulated,
       capturedAt: saved.rows[0]!.captured_at,
     };

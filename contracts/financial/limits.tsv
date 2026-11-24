@@ -1,0 +1,7 @@
+amount_minor	reserved_minor	maximum_minor	daily_minor	result
+100	400	100	500	allow
+101	0	100	500	deny
+100	401	100	500	deny
+0	0	100	500	deny
+1	-1	100	500	deny
+1	9223372036854775807	100	500	deny

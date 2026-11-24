@@ -6,9 +6,17 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: tukupay-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     services:
       postgres:
         image: postgres:17-alpine
@@ -25,6 +33,7 @@ jobs:
           --health-retries 20
     env:
       DATABASE_URL: postgres://tukupay:tukupay@127.0.0.1:5432/tukupay
+      TUKUPAY_FINANCIAL_ENVIRONMENT: simulator
       TUKUPAY_SIMULATOR_ENABLED: "true"
       TUKUPAY_SERVICE_TOKEN: ci-admin-token-0123456789
       TUKUPAY_E2E_KELA_TOKEN: ci-kela-token-0123456789
@@ -32,15 +41,33 @@ jobs:
       RECONCILIATION_ENABLED: "false"
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: corepack enable
-      - run: pnpm install --no-frozen-lockfile
+      - name: Prepare pinned package manager
+        run: |
+          corepack enable
+          pnpm --version
+          test "$(pnpm --version)" = "9.15.4"
+      - name: Install dependencies
+        run: |
+          if test -f pnpm-lock.yaml; then
+            pnpm install --frozen-lockfile
+          else
+            echo '::warning::Development verification only: dependency lockfile is missing.'
+            pnpm install --no-frozen-lockfile
+          fi
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm db:migrate
+      - name: Bind disposable simulator database
+        run: psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 -v environment=simulator -f database/checks/bind_empty_environment.sql
       - run: pnpm build
+      - name: Configure independent simulator approver
+        run: |
+          node -e 'const fs=require("node:fs");const value=require("node:crypto").randomBytes(24).toString("hex");const registry=JSON.parse(process.env.TUKUPAY_SERVICE_TOKENS_JSON);registry.finance={token:value,scopes:["payouts:approve","products:kela"]};fs.appendFileSync(process.env.GITHUB_ENV,"TUKUPAY_E2E_APPROVER_TOKEN="+value+"\nTUKUPAY_SERVICE_TOKENS_JSON="+JSON.stringify(registry)+"\n")'
       - name: Start API
         run: |
           pnpm --filter @tuku/pay-api start > /tmp/tukupay-api.log 2>&1 &
@@ -52,3 +79,56 @@ jobs:
           exit 1
       - name: Simulator end-to-end
         run: node apps/api/scripts/e2e-simulator.mjs
+      - name: Record tested revision
+        run: git rev-parse HEAD
+      - name: Verify simulator journal and payout invariants
+        run: |
+          psql "$DATABASE_URL" -X -qAt -v ON_ERROR_STOP=1 -f database/checks/payment_integrity.sql > /tmp/tukupay-integrity.txt
+          if test -s /tmp/tukupay-integrity.txt; then
+            cat /tmp/tukupay-integrity.txt
+            exit 1
+          fi
+
+  financial-modules:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Python intelligence
+        run: |
+          python3 -m unittest discover -s python/intelligence -p 'test_*.py' -v
+          python3 python/intelligence/cli.py python/intelligence/fixtures/sample.json --statements python/intelligence/fixtures/statement.csv
+      - name: Rust financial kernel
+        run: |
+          rustc --version
+          cargo test --manifest-path crates/financial-kernel/Cargo.toml --locked --offline
+          cargo build --manifest-path crates/financial-kernel/Cargo.toml --locked --offline --bin shadow --bin journal_audit
+          crates/financial-kernel/target/debug/journal_audit < contracts/financial/journals.tsv
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Prepare pinned package manager
+        run: |
+          corepack enable
+          pnpm --version
+          test "$(pnpm --version)" = "9.15.4"
+      - name: Install dependencies
+        run: |
+          if test -f pnpm-lock.yaml; then
+            pnpm install --frozen-lockfile
+          else
+            echo '::warning::Development verification only: dependency lockfile is missing.'
+            pnpm install --no-frozen-lockfile
+          fi
+      - run: pnpm build
+      - name: Intelligence report validation
+        run: |
+          node --test scripts/intelligence-report.test.mjs
+          node --check scripts/ops-workspace.mjs
+      - name: Financial kernel parity
+        run: node scripts/compare-financial-kernel.mjs crates/financial-kernel/target/debug/shadow

@@ -1,5 +1,7 @@
 const base = process.env.TUKUPAY_E2E_URL ?? 'http://127.0.0.1:8080';
 const admin = process.env.TUKUPAY_SERVICE_TOKEN ?? 'ci-admin-token-0123456789';
+const approver = process.env.TUKUPAY_E2E_APPROVER_TOKEN;
+if (!approver) throw new Error('Independent simulator approver credential is required');
 const kela = process.env.TUKUPAY_E2E_KELA_TOKEN ?? 'ci-kela-token-0123456789';
 
 async function call(method, path, token, body, idempotencyKey) {
@@ -19,6 +21,16 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+const preflight = await call('GET', '/v1/ops/summary', admin);
+assert(preflight.response.ok && preflight.payload.ops.simulator === true, 'Refusing to run financial E2E outside simulator mode');
+
+const capabilities = await call('GET', '/v1/ops/provider-capabilities', admin);
+assert(capabilities.response.ok && capabilities.payload.simulator === true, 'capabilities must report simulator runtime');
+const uganda = capabilities.payload.markets.find(market => market.country === 'UG');
+assert(uganda.providers.some(rail => rail.provider === 'mtn' && rail.collection.available), 'Uganda simulator collection must be available');
+assert(capabilities.payload.candidates.every(rail => rail.status === 'planned'), 'candidate providers are not routable');
+assert((await call('GET', '/v1/ops/provider-capabilities', kela)).response.status === 403, 'ops capabilities are scoped');
+
 const stamp = Date.now();
 const paymentBody = {
   product: 'kela',
@@ -37,9 +49,19 @@ assert(result.payload.payment.status === 'PENDING', 'payment should start PENDIN
 
 result = await call('POST', '/v1/payments', kela, paymentBody, `pay-${stamp}`);
 assert(result.payload.payment.id === paymentId, 'idempotent payment must return same id');
+const conflict = await call('POST', '/v1/payments', kela, { ...paymentBody, money: { amount: '2600', currency: 'UGX' } }, `pay-${stamp}`);
+assert(conflict.response.status === 409, 'changed amount must not silently reuse an existing payment');
 
 result = await call('POST', `/v1/payments/${paymentId}/refresh`, kela);
 assert(result.payload.payment.status === 'SUCCESSFUL', 'simulated payment should become SUCCESSFUL');
+
+const foreign = await call('POST', '/v1/payments', kela, { ...paymentBody, product: 'units', externalId: `FOREIGN-${stamp}` });
+assert(foreign.response.status === 403, 'cross-product create is denied');
+const other = await call('POST', '/v1/payments', admin, { ...paymentBody, product: 'units', externalId: `OTHER-${stamp}` });
+assert(other.response.status === 202, 'admin can create other product payment');
+const otherId = other.payload.payment.id;
+assert((await call('GET', `/v1/payments/${otherId}`, kela)).response.status === 403, 'cross-product read is denied');
+assert((await call('POST', `/v1/payments/${otherId}/refresh`, kela)).response.status === 403, 'cross-product refresh is denied');
 
 const delayedBody = {
   ...paymentBody,
@@ -67,9 +89,48 @@ assert(forbidden.response.status === 403, 'collection-only credential must be de
 result = await call('GET', '/v1/ops/summary', admin);
 assert(result.response.ok && result.payload.ops.simulator === true, 'ops summary should report simulator mode');
 
+
+const timeoutBody = { ...paymentBody, externalId: `E2E-TIMEOUT-${stamp}`, metadata: { simulatorScenario: 'timeout_then_success' } };
+result = await call('POST', '/v1/payments', kela, timeoutBody, `timeout-${stamp}`);
+assert(result.response.status === 202 && result.payload.payment.status === 'PENDING', 'ambiguous write must remain pending');
+const timeoutId = result.payload.payment.id;
+const exceptions = await call('GET', '/v1/ops/exceptions', admin);
+assert(exceptions.response.ok && exceptions.payload.exceptions.some(row => row.id === timeoutId && row.reason === 'PROVIDER_ERROR'), 'ambiguous write must appear in exception queue');
+assert((await call('GET', '/v1/ops/exceptions', kela)).response.status === 403, 'product without ops scope must not see exceptions');
+const reviewBody = { kind: 'collection', id: timeoutId, state: 'INVESTIGATING', assignedTo: 'finance', note: 'Simulator investigation', expectedVersion: 0 };
+assert((await call('POST','/v1/ops/exceptions/review',kela,reviewBody)).response.status === 403, 'review requires ops:manage');
+const review = await call('POST','/v1/ops/exceptions/review',admin,reviewBody);
+assert(review.response.ok && review.payload.review.version === 1,'first review recorded');
+assert((await call('POST','/v1/ops/exceptions/review',admin,reviewBody)).response.status === 409,'stale review version denied');
+const reviewed = await call('GET','/v1/ops/exceptions',admin);
+assert(reviewed.payload.exceptions.some(row => row.id === timeoutId && row.review_state === 'INVESTIGATING'),'review state visible without changing payment');
+const timeoutRef = result.payload.payment.providerReference;
+result = await call('POST', '/v1/payments', kela, timeoutBody, `timeout-${stamp}`);
+assert(result.payload.payment.id === timeoutId && result.payload.payment.providerReference === timeoutRef, 'retry must reuse original payment and provider reference');
+for (let i = 0; i < 2; i++) result = await call('POST', `/v1/payments/${timeoutId}/refresh`, kela);
+assert(result.payload.payment.status === 'SUCCESSFUL', 'ambiguous write must reconcile');
+
+const payoutBody = { ...paymentBody, externalId: `E2E-PAYOUT-${stamp}` };
+result = await call('POST', '/v1/payouts', admin, payoutBody, `payout-${stamp}`);
+assert(result.response.status === 201 && result.payload.payout.status === 'APPROVAL_REQUIRED', 'payout must require approval');
+const payoutId = result.payload.payout.id;
+assert(!result.payload.payout.providerReference, 'unapproved payout must not be dispatched');
+const payoutConflict = await call('POST', '/v1/payouts', admin, { ...payoutBody, money: { amount: '2600', currency: 'UGX' } }, `payout-${stamp}`);
+assert(payoutConflict.response.status === 409, 'changed payout amount must be rejected');
+assert((await call('POST', `/v1/payouts/${payoutId}/approve`, admin)).response.status === 403, 'requester cannot approve own payout');
+const approvals = await Promise.all([0, 1].map(() => call('POST', `/v1/payouts/${payoutId}/approve`, approver, { reason: 'Simulator test only' })));
+assert(approvals.every(a => a.response.ok), 'concurrent approvals must be idempotent');
+result = await call('GET', `/v1/payouts/${payoutId}`, admin);
+assert(result.response.ok && result.payload.payout.status === 'PENDING', 'approved payout should be pending');
+const payoutRef = result.payload.payout.providerReference;
+result = await call('POST', `/v1/payouts/${payoutId}/approve`, approver);
+assert(result.payload.payout.providerReference === payoutRef, 'repeat approval must not dispatch again');
+result = await call('POST', `/v1/payouts/${payoutId}/refresh`, admin);
+assert(result.payload.payout.status === 'SUCCESSFUL', 'approved payout should reconcile');
+
 console.log(JSON.stringify({
   ok: true,
   paymentId,
   delayedId,
-  checks: ['scoped-auth', 'idempotency', 'collection-success', 'delayed-reconciliation', 'payout-scope-denial', 'ops-summary'],
+  checks: ['scoped-auth', 'idempotency', 'collection-success', 'delayed-reconciliation', 'payout-scope-denial', 'ops-summary', 'ambiguous-write-reconciliation', 'payout-approval-and-idempotency'],
 }));

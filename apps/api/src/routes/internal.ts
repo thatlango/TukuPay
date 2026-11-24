@@ -1,3 +1,5 @@
+import { configuredEnvironment } from '../config/financial-environment.js';
+import { boundedInteger } from '../utils/request-validation.js';
 import { timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { db } from '../db/pool.js';
@@ -28,13 +30,21 @@ export async function registerInternalRoutes(
         (SELECT count(*)::int FROM payment_intents) payment_intents,
         (SELECT count(*)::int FROM payment_intents WHERE status='PENDING') payments_pending,
         (SELECT count(*)::int FROM payment_intents WHERE status='SUCCESSFUL') payments_successful,
-        (SELECT coalesce(sum(amount_minor),0)::bigint FROM payment_intents WHERE status='SUCCESSFUL') collected_minor,
         (SELECT count(*)::int FROM payout_requests) payout_requests,
         (SELECT count(*)::int FROM payout_requests WHERE status IN ('APPROVAL_REQUIRED','APPROVED','PENDING')) payouts_pending,
         (SELECT count(*)::int FROM payout_requests WHERE status='SUCCESSFUL') payouts_successful,
-        (SELECT coalesce(sum(amount_minor),0)::bigint FROM payout_requests WHERE status='SUCCESSFUL') paid_out_minor,
         (SELECT count(*)::int FROM webhook_events WHERE processing_error IS NOT NULL) webhook_errors,
         (SELECT count(*)::int FROM reconciliation_runs WHERE status='FAILED') reconciliation_failures,
+        (SELECT coalesce(jsonb_agg(jsonb_build_object('currency',currency,'collectedMinor',collected_minor,'paidOutMinor',paid_out_minor) ORDER BY currency),'[]'::jsonb)
+         FROM (
+           SELECT currency,coalesce(sum(amount_minor) FILTER (WHERE kind='collection'),0)::text AS collected_minor,
+                  coalesce(sum(amount_minor) FILTER (WHERE kind='payout'),0)::text AS paid_out_minor
+           FROM (
+             SELECT currency,amount_minor,'collection' AS kind FROM payment_intents WHERE status='SUCCESSFUL'
+             UNION ALL
+             SELECT currency,amount_minor,'payout' AS kind FROM payout_requests WHERE status='SUCCESSFUL'
+           ) amounts GROUP BY currency
+         ) scoped_amounts) amounts_by_currency,
         (SELECT max(updated_at) FROM payment_intents) last_payment_at,
         (SELECT max(updated_at) FROM payout_requests) last_payout_at,
         (SELECT max(received_at) FROM webhook_events) last_webhook_at
@@ -42,16 +52,17 @@ export async function registerInternalRoutes(
     const row = result.rows[0] ?? {};
     return {
       productCode: 'tukupay',
+      schemaVersion: 2,
+      financialEnvironment: configuredEnvironment(),
+      amountsByCurrency: row.amounts_by_currency ?? [],
       generatedAt: new Date().toISOString(),
       kpis: {
         paymentIntents: Number(row.payment_intents ?? 0),
         paymentsPending: Number(row.payments_pending ?? 0),
         paymentsSuccessful: Number(row.payments_successful ?? 0),
-        collectedMinor: Number(row.collected_minor ?? 0),
         payoutRequests: Number(row.payout_requests ?? 0),
         payoutsPending: Number(row.payouts_pending ?? 0),
         payoutsSuccessful: Number(row.payouts_successful ?? 0),
-        paidOutMinor: Number(row.paid_out_minor ?? 0),
         webhookErrors: Number(row.webhook_errors ?? 0),
         reconciliationFailures: Number(row.reconciliation_failures ?? 0),
       },
@@ -67,8 +78,7 @@ export async function registerInternalRoutes(
     const body = request.body && typeof request.body === 'object'
       ? request.body as { limit?: unknown }
       : {};
-    const parsed = Number(body.limit ?? 50);
-    const limit = Number.isFinite(parsed) ? Math.max(1, Math.min(parsed, 500)) : 50;
+    const limit = boundedInteger(body.limit,50,1,500);
     return { reconciliation: await reconciliation.runBatch(limit) };
   });
 }

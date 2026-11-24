@@ -3,6 +3,7 @@ import { TukuPayError } from '../errors.js';
 const EXPONENTS: Record<string, number> = {
   BIF: 0,
   CDF: 2,
+  EUR: 2,
   GHS: 2,
   GNF: 0,
   KES: 2,
@@ -16,19 +17,26 @@ const EXPONENTS: Record<string, number> = {
   SZL: 2,
   TZS: 2,
   UGX: 0,
+  USD: 2,
   XAF: 0,
   XOF: 0,
   ZAR: 2,
   ZMW: 2,
 };
 
+export const MAX_MINOR = 9223372036854775807n;
+
 export function currencyExponent(currency: string): number {
-  return EXPONENTS[currency.toUpperCase()] ?? 2;
+  const code = currency.toUpperCase();
+  if (!Object.hasOwn(EXPONENTS, code)) {
+    throw new TukuPayError('Unsupported currency', 'INVALID_CURRENCY', 400);
+  }
+  return EXPONENTS[code]!;
 }
 
 export function majorToMinor(amount: string, currency: string): bigint {
   const value = amount.trim();
-  if (!/^\d+(?:\.\d+)?$/.test(value)) {
+  if (value.length > 64 || !/^\d+(?:\.\d+)?$/.test(value)) {
     throw new TukuPayError('Amount must be a positive decimal number', 'INVALID_AMOUNT', 400);
   }
 
@@ -47,16 +55,24 @@ export function majorToMinor(amount: string, currency: string): bigint {
   if (minor <= 0n) {
     throw new TukuPayError('Amount must be greater than zero', 'INVALID_AMOUNT', 400);
   }
+  if (minor > MAX_MINOR) {
+    throw new TukuPayError('Amount exceeds supported range', 'INVALID_AMOUNT_RANGE', 400);
+  }
   return minor;
 }
 
 export function minorToMajor(minorValue: string | bigint, currency: string): string {
+  if (typeof minorValue === 'string' && !/^-?(?:0|[1-9]\d*)$/.test(minorValue)) {
+    throw new TukuPayError('Invalid minor-unit amount', 'INVALID_AMOUNT', 400);
+  }
   const minor = typeof minorValue === 'bigint' ? minorValue : BigInt(minorValue);
   const exponent = currencyExponent(currency);
   if (exponent === 0) return minor.toString();
 
+  const sign = minor < 0n ? '-' : '';
+  const absolute = minor < 0n ? -minor : minor;
   const scale = 10n ** BigInt(exponent);
-  const whole = minor / scale;
-  const fraction = (minor % scale).toString().padStart(exponent, '0').replace(/0+$/, '');
-  return fraction ? `${whole}.${fraction}` : whole.toString();
+  const whole = absolute / scale;
+  const fraction = (absolute % scale).toString().padStart(exponent, '0').replace(/0+$/, '');
+  return sign + (fraction ? `${whole}.${fraction}` : whole.toString());
 }

@@ -1,11 +1,15 @@
+import { checkPayoutLimits, readPayoutLimits } from './payout-limits.js';
+import { assertSameIntent } from './idempotency.js';
+import type { PoolClient } from 'pg';
 import { randomUUID } from 'node:crypto';
 import { getMarket } from '../config/markets.js';
-import { providerRuntimeMode, providerTransactionCurrency, providerUsesOperatorSandbox } from '../config/provider-credentials.js';
+import { providerRuntimeMode, providerTransactionCurrency, providerUsesOperatorSandbox, simulatorEnabled } from '../config/provider-credentials.js';
 import { db } from '../db/pool.js';
 import type { PaymentStatus, ProviderCode } from '../domain/payments.js';
 import type { CreatePayoutInput, PayoutStatus } from '../domain/payouts.js';
 import { TukuPayError } from '../errors.js';
 import { ProviderHttpError } from '../providers/http.js';
+import { assertSuccessfulSettlement } from '../providers/settlement-validation.js';
 import { majorToMinor, minorToMajor } from '../utils/money.js';
 import { normalizeMsisdn, normalizeSandboxMsisdn } from '../utils/msisdn.js';
 import { ProviderRouter } from './provider-router.js';
@@ -22,6 +26,7 @@ type PayoutRow = {
   description: string | null;
   status: PayoutStatus;
   metadata: Record<string, unknown>;
+  requested_by: string | null;
   approved_by: string | null;
   approved_at: Date | null;
   provider_reference: string | null;
@@ -45,6 +50,7 @@ export type PayoutView = {
   status: PayoutStatus;
   providerStatus: string | null;
   lastError: string | null;
+  requestedBy: string | null;
   approvedBy: string | null;
   approvedAt: Date | null;
   metadata: Record<string, unknown>;
@@ -84,6 +90,7 @@ export class PayoutService {
       status: row.status,
       providerStatus: row.provider_status,
       lastError: row.last_error,
+      requestedBy: row.requested_by,
       approvedBy: row.approved_by,
       approvedAt: row.approved_at,
       metadata: row.metadata,
@@ -96,7 +103,7 @@ export class PayoutService {
     const result = await db.query<PayoutRow>(
       `SELECT pr.id, pr.product_code, pr.external_id, pr.country_code, pr.provider_code,
               pr.amount_minor::text, pr.currency, pr.phone_e164, pr.description,
-              pr.status, pr.metadata, pr.approved_by, pr.approved_at,
+              pr.status, pr.metadata, pr.requested_by, pr.approved_by, pr.approved_at,
               ppt.provider_reference, ppt.provider_status, ppt.last_error,
               pr.created_at, pr.updated_at
          FROM payout_requests pr
@@ -122,13 +129,17 @@ export class PayoutService {
       `SELECT id FROM payout_requests
         WHERE product_code = $1
           AND (external_id = $2 OR ($3::text IS NOT NULL AND idempotency_key = $3))
-        ORDER BY created_at DESC LIMIT 1`,
+        ORDER BY created_at DESC LIMIT 2`,
       [product, externalId, idempotencyKey ?? null],
     );
+    if (result.rows.length > 1) {
+      throw new TukuPayError('External ID and idempotency key identify different requests', 'IDEMPOTENCY_CONFLICT', 409);
+    }
     return result.rows[0] ? this.getById(result.rows[0].id) : null;
   }
 
-  async create(input: CreatePayoutInput, idempotencyKey?: string): Promise<PayoutView> {
+  async create(input: CreatePayoutInput, idempotencyKey?: string, requester?: string): Promise<PayoutView> {
+    const requestedBy = required(requester, 'requester').toLowerCase();
     const product = required(input.product, 'product').toLowerCase();
     const externalId = required(input.externalId, 'externalId');
     const country = required(input.country, 'country').toUpperCase();
@@ -137,6 +148,9 @@ export class PayoutService {
     const market = getMarket(country);
     const adapter = this.router.resolvePayout(country, input.provider);
     const runtimeMode = providerRuntimeMode(adapter.provider, country);
+    if (runtimeMode === 'production' && process.env.TUKUPAY_LIVE_PAYOUTS_ENABLED !== 'true') {
+      throw new TukuPayError('Live payouts are not enabled', 'LIVE_PAYOUT_DISABLED', 503);
+    }
     const operatorSandbox = providerUsesOperatorSandbox(adapter.provider, country);
     const expectedCurrency = providerTransactionCurrency(adapter.provider, country, market.currency);
 
@@ -148,32 +162,34 @@ export class PayoutService {
       );
     }
 
-    const existing = await this.findExisting(product, externalId, idempotencyKey);
-    if (existing) return existing;
-
     const amountMinor = majorToMinor(amount, currency);
+    if (runtimeMode === 'production') checkPayoutLimits(amountMinor, 0n, readPayoutLimits(country, currency));
     const rawPhone = required(input.phone, 'phone');
     const phone = operatorSandbox
       ? normalizeSandboxMsisdn(rawPhone)
       : normalizeMsisdn(rawPhone, country);
+    const intent = { product, externalId, country, provider: adapter.provider, amount, currency, phone,
+      description: input.description ?? null, metadata: input.metadata ?? {} };
+    const existing = await this.findExisting(product, externalId, idempotencyKey);
+    if (existing) return assertSameIntent(existing, intent);
     const id = randomUUID();
 
     try {
       await db.query(
         `INSERT INTO payout_requests
           (id, product_code, external_id, country_code, provider_code, amount_minor,
-           currency, phone_e164, description, status, metadata, idempotency_key)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'APPROVAL_REQUIRED',$10::jsonb,$11)`,
+           currency, phone_e164, description, status, metadata, idempotency_key, requested_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'APPROVAL_REQUIRED',$10::jsonb,$11,$12)`,
         [
           id, product, externalId, country, adapter.provider, amountMinor.toString(),
           currency, phone, input.description ?? null,
-          JSON.stringify(input.metadata ?? {}), idempotencyKey ?? null,
+          JSON.stringify(input.metadata ?? {}), idempotencyKey ?? null, requestedBy,
         ],
       );
     } catch (error) {
       if ((error as { code?: string }).code === '23505') {
         const raced = await this.findExisting(product, externalId, idempotencyKey);
-        if (raced) return raced;
+        if (raced) return assertSameIntent(raced, intent);
       }
       throw error;
     }
@@ -184,17 +200,17 @@ export class PayoutService {
     const client = await db.connect();
     try {
       await client.query('BEGIN');
-      const current = await client.query<{ status: PayoutStatus }>(
-        'SELECT status FROM payout_requests WHERE id = $1 FOR UPDATE',
+      const current = await client.query<{ status: PayoutStatus; requested_by: string | null; approved_by: string | null }>(
+        'SELECT status, requested_by, approved_by FROM payout_requests WHERE id = $1 FOR UPDATE',
         [id],
       );
       const row = current.rows[0];
       if (!row) throw new TukuPayError('Payout not found', 'PAYOUT_NOT_FOUND', 404);
-      if (['SUCCESSFUL', 'PENDING', 'APPROVED'].includes(row.status)) {
+      if (['SUCCESSFUL', 'PENDING'].includes(row.status)) {
         await client.query('COMMIT');
         return this.getById(id);
       }
-      if (row.status !== 'APPROVAL_REQUIRED') {
+      if (row.status !== 'APPROVAL_REQUIRED' && row.status !== 'APPROVED') {
         throw new TukuPayError(
           `Payout cannot be approved from ${row.status}`,
           'INVALID_PAYOUT_STATE',
@@ -202,6 +218,13 @@ export class PayoutService {
         );
       }
 
+      if (!row.requested_by || row.requested_by.toLowerCase() === actor.toLowerCase()) {
+        throw new TukuPayError('A recorded requester and independent approver are required', 'PAYOUT_APPROVER_CONFLICT', 403);
+      }
+      if (row.status === 'APPROVED' && row.approved_by !== actor) {
+        throw new TukuPayError('Only the recorded approver may resume approval', 'PAYOUT_APPROVER_CONFLICT', 403);
+      }
+      if (row.status === 'APPROVAL_REQUIRED') {
       await client.query(
         `UPDATE payout_requests
             SET status='APPROVED', approved_by=$2, approved_at=now(), updated_at=now()
@@ -218,6 +241,7 @@ export class PayoutService {
          VALUES ($1,'payout.approved','payout',$2,$3::jsonb)`,
         [actor, id, JSON.stringify({ reason: reason ?? null })],
       );
+      }
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');
@@ -238,6 +262,9 @@ export class PayoutService {
     }
 
     const runtimeMode = providerRuntimeMode(payout.provider, payout.country);
+    if (runtimeMode === 'production' && process.env.TUKUPAY_LIVE_PAYOUTS_ENABLED !== 'true') {
+      throw new TukuPayError('Live payouts are not enabled', 'LIVE_PAYOUT_DISABLED', 503);
+    }
     const market = await db.query<{ id: string }>(
       `SELECT id FROM provider_markets
         WHERE country_code=$1 AND provider_code=$2 AND environment=$3 AND enabled=TRUE
@@ -250,28 +277,69 @@ export class PayoutService {
     }
 
     const providerReference = randomUUID();
-    await db.query(
-      `INSERT INTO provider_payout_transactions
-        (payout_request_id, provider_market_id, provider_reference, normalized_status,
-         request_payload)
-       VALUES ($1,$2,$3,'PENDING',$4::jsonb)`,
-      [
-        payout.id,
-        providerMarketId,
-        providerReference,
-        JSON.stringify({
-          product: payout.product,
-          externalId: payout.externalId,
-          country: payout.country,
-          provider: payout.provider,
-          money: { amount: payout.amount, currency: payout.currency },
-          phone: payout.phone,
-          description: payout.description,
-          metadata: payout.metadata,
-        }),
-      ],
-    );
-    await db.query(`UPDATE payout_requests SET status='PENDING', updated_at=now() WHERE id=$1`, [id]);
+    // Reserve the only permitted dispatch before any financial network request.
+    // A crash after reservation is ambiguous; reconciliation must investigate the
+    // original reference, never generate a second transfer.
+    const client = await db.connect();
+    let reserved = false;
+    try {
+      await client.query('BEGIN');
+      if (runtimeMode === 'production') {
+        // Serialize reservations across providers/products for the same market and currency.
+        const key = 'tukupay-payout-limit:' + payout.country + ':' + payout.currency;
+        await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [key]);
+        const sum = await client.query<{ reserved: string }>(
+          `SELECT COALESCE(SUM(pr.amount_minor),0)::text AS reserved
+             FROM payout_requests pr
+            WHERE pr.country_code=$1 AND pr.currency=$2
+              AND EXISTS (
+                SELECT 1 FROM provider_payout_transactions pt
+                JOIN provider_markets pm ON pm.id=pt.provider_market_id
+                 WHERE pt.payout_request_id=pr.id AND pm.environment='production'
+                   AND pt.created_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
+              )`,
+          [payout.country, payout.currency],
+        );
+        checkPayoutLimits(majorToMinor(payout.amount, payout.currency),
+          BigInt(sum.rows[0]?.reserved ?? '0'), readPayoutLimits(payout.country, payout.currency));
+      }
+      const claimed = await client.query(
+        "UPDATE payout_requests SET status='PENDING', updated_at=now() WHERE id=$1 AND status='APPROVED' RETURNING id",
+        [id],
+      );
+      if (claimed.rowCount === 1) {
+          await client.query(
+            `INSERT INTO provider_payout_transactions
+              (payout_request_id, provider_market_id, provider_reference, normalized_status,
+               request_payload)
+             VALUES ($1,$2,$3,'PENDING',$4::jsonb)`,
+            [
+              payout.id,
+              providerMarketId,
+              providerReference,
+              JSON.stringify({
+                product: payout.product,
+                externalId: payout.externalId,
+                country: payout.country,
+                provider: payout.provider,
+                money: { amount: payout.amount, currency: payout.currency },
+                phone: payout.phone,
+                description: payout.description,
+                metadata: payout.metadata,
+              }),
+            ],
+          );
+      
+        reserved = true;
+      }
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+    if (!reserved) return this.getById(id);
 
     const input: CreatePayoutInput = {
       product: payout.product,
@@ -284,13 +352,19 @@ export class PayoutService {
     };
     if (payout.description) input.description = payout.description;
 
+    // Mark the durable reservation before the provider call. No replay on ambiguity.
+    const claim = await db.query(
+      "UPDATE financial_dispatch_records SET phase='ATTEMPTING', attempted_at=now() WHERE kind=$1 AND transaction_id=$2 AND provider_reference=$3 AND phase='RESERVED' RETURNING id",
+      ['payout', id, providerReference],
+    );
+    if (claim.rowCount !== 1) return this.getById(id);
     try {
       const transaction = await adapter.payout(
         { country: payout.country, currency: payout.currency },
         input,
         providerReference,
       );
-      await this.applyStatus(id, providerReference, transaction.status, transaction.raw, null);
+      await this.applyStatus(id, providerReference, transaction.status === 'SUCCESSFUL' ? 'PENDING' : transaction.status, transaction.raw, null);
     } catch (error) {
       const retryable = !(error instanceof ProviderHttpError) || error.retryable;
       await this.applyStatus(
@@ -298,7 +372,7 @@ export class PayoutService {
         providerReference,
         retryable ? 'PENDING' : 'FAILED',
         null,
-        error instanceof Error ? error.message : 'Unknown provider error',
+        'Provider request failed; review transport telemetry',
       );
     }
     return this.getById(id);
@@ -316,22 +390,90 @@ export class PayoutService {
     const status = await adapter.getPayoutStatus(
       { country: payout.country, currency: payout.currency },
       payout.providerReference,
-    );
+    ).catch(async (error: unknown) => {
+      await db.query(
+        `UPDATE provider_payout_transactions SET last_checked_at=now(), attempts=attempts+1,
+          last_error='Provider status request failed', updated_at=now()
+          WHERE payout_request_id=$1 AND provider_reference=$2 AND normalized_status='PENDING'`,
+        [id, payout.providerReference],
+      );
+      throw error;
+    });
+    if (status.status === 'SUCCESSFUL') {
+      try {
+        assertSuccessfulSettlement(status.raw, {
+          provider: payout.provider,
+          reference: payout.providerReference,
+          externalId: payout.externalId,
+          amount: payout.amount,
+          currency: payout.currency,
+          simulator: simulatorEnabled(),
+        });
+      } catch (error) {
+        await this.applyStatus(id, payout.providerReference, 'PENDING', status.raw,
+          'Settlement evidence verification failed');
+        throw new TukuPayError('Provider settlement could not be verified', 'SETTLEMENT_UNVERIFIED', 502);
+      }
+    }
     await this.applyStatus(id, payout.providerReference, status.status, status.raw, null);
     return this.getById(id);
   }
 
   async pendingPayoutIds(limit: number): Promise<string[]> {
     const result = await db.query<{ payout_request_id: string }>(
-      `SELECT DISTINCT payout_request_id
+      `SELECT payout_request_id
          FROM provider_payout_transactions
         WHERE normalized_status='PENDING'
-          AND (last_checked_at IS NULL OR last_checked_at < now() - interval '5 seconds')
-        ORDER BY payout_request_id
+          AND (last_checked_at IS NULL OR last_checked_at < now() -
+            CASE WHEN last_error IS NULL THEN interval '5 seconds'
+                 ELSE interval '5 seconds' * LEAST(60, POWER(2, LEAST(attempts, 6))) END)
+        GROUP BY payout_request_id
+        ORDER BY MIN(last_checked_at) NULLS FIRST, payout_request_id
         LIMIT $1`,
       [Math.max(1, Math.min(limit, 500))],
     );
     return result.rows.map((row) => row.payout_request_id);
+  }
+
+  // Provisional clearing policy: no expense, loan principal, or supplier liability
+  // classification here. The owning product's finance layer allocates the debit.
+  private async ensurePayoutLedger(client: PoolClient, payoutId: string): Promise<void> {
+    const result = await client.query<{
+      amount_minor: string; currency: string; country_code: string; product_code: string; provider_code: ProviderCode;
+    }>(
+      `SELECT amount_minor::text,currency,country_code,product_code,provider_code
+         FROM payout_requests WHERE id=$1 AND status='SUCCESSFUL'`,
+      [payoutId],
+    );
+    const payout = result.rows[0];
+    if (!payout) throw new Error('Successful payout is missing for ledger posting');
+    const journal = await client.query<{ id: string }>(
+      `INSERT INTO journal_entries(reference_type,reference_id,country_code,currency,description)
+       VALUES ('PAYOUT_DISBURSEMENT',$1,$2,$3,$4)
+       ON CONFLICT(reference_type,reference_id) DO NOTHING RETURNING id`,
+      [payoutId, payout.country_code, payout.currency, 'Payout clearing allocation'],
+    );
+    const journalId = journal.rows[0]?.id;
+    if (!journalId) return;
+    const productCode = `PRODUCT:${payout.product_code.toUpperCase()}:${payout.country_code}:${payout.currency}:PAYOUT_CLEARING`;
+    const providerCode = `${payout.provider_code.toUpperCase()}:${payout.country_code}:${payout.currency}:DISBURSEMENT_CLEARING`;
+    const product = await client.query<{ id: string }>(
+      `INSERT INTO ledger_accounts(code,name,account_type,product_code,country_code,currency)
+       VALUES ($1,'Product payout allocation clearing','ASSET',$2,$3,$4)
+       ON CONFLICT(code) DO UPDATE SET name=EXCLUDED.name RETURNING id`,
+      [productCode,payout.product_code,payout.country_code,payout.currency],
+    );
+    const provider = await client.query<{ id: string }>(
+      `INSERT INTO ledger_accounts(code,name,account_type,country_code,currency)
+       VALUES ($1,'Provider disbursement clearing','ASSET',$2,$3)
+       ON CONFLICT(code) DO UPDATE SET name=EXCLUDED.name RETURNING id`,
+      [providerCode,payout.country_code,payout.currency],
+    );
+    await client.query(
+      `INSERT INTO ledger_postings(journal_entry_id,ledger_account_id,side,amount_minor)
+       VALUES ($1,$2,'DEBIT',$4),($1,$3,'CREDIT',$4)`,
+      [journalId,product.rows[0]!.id,provider.rows[0]!.id,payout.amount_minor],
+    );
   }
 
   private async applyStatus(
@@ -348,7 +490,7 @@ export class PayoutService {
       await client.query('BEGIN');
       await client.query(
         `UPDATE provider_payout_transactions
-            SET normalized_status=$3, provider_status=$3,
+            SET normalized_status=CASE WHEN normalized_status='SUCCESSFUL' THEN normalized_status ELSE $3 END, provider_status=$3,
                 response_payload=COALESCE($4::jsonb,response_payload),
                 last_error=$5, attempts=attempts+1, last_checked_at=now(), updated_at=now()
           WHERE payout_request_id=$1 AND provider_reference=$2`,
@@ -361,6 +503,13 @@ export class PayoutService {
           WHERE id=$1`,
         [payoutId, status],
       );
+      if (status === 'SUCCESSFUL') await this.ensurePayoutLedger(client, payoutId);
+      if (responsePayload !== null && responsePayload !== undefined) {
+        await client.query(
+          "UPDATE financial_dispatch_records SET phase='OBSERVED', observed_at=now() WHERE kind=$1 AND transaction_id=$2 AND provider_reference=$3 AND phase='ATTEMPTING'",
+          ['payout', payoutId, providerReference],
+        );
+      }
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');

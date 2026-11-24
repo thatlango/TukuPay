@@ -23,6 +23,7 @@ export async function registerWebhookRoutes(
     const params = request.params as { provider: string; country: string; reference?: string };
     const rail = provider(params.provider.toLowerCase());
     const country = params.country.toUpperCase();
+    if (!/^[A-Z]{2}$/.test(country)) throw new TukuPayError('Invalid callback market', 'INVALID_MARKET', 400);
     const event = await payments.recordWebhook(
       rail,
       country,
@@ -31,14 +32,14 @@ export async function registerWebhookRoutes(
       signature(request),
     );
 
-    setImmediate(() => {
+    if (event.eventId) setImmediate(() => {
       void payments.processWebhook(event.eventId, rail, country, event.reference)
-        .catch((error) => request.log.error({ err: error }, 'Webhook verification failed'));
+        .catch(() => request.log.error({ event: 'webhook_verification_failed' }, 'Webhook verification failed'));
     });
 
     return reply.code(202).send({ accepted: true });
   };
 
-  app.route({ method: ['POST', 'PUT'], url: '/webhooks/:provider/:country/:reference', handler });
-  app.route({ method: ['POST', 'PUT'], url: '/webhooks/:provider/:country', handler });
+  app.route({ method: ['POST', 'PUT'], url: '/webhooks/:provider/:country/:reference', bodyLimit: 64 * 1024, handler });
+  app.route({ method: ['POST', 'PUT'], url: '/webhooks/:provider/:country', bodyLimit: 64 * 1024, handler });
 }

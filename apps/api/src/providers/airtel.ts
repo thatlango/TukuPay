@@ -1,3 +1,5 @@
+import { validateBalance } from './balance-validation.js';
+import type { TransportScope } from './telemetry.js';
 import { getMarket } from '../config/markets.js';
 import {
   getOperatorCredentials,
@@ -6,9 +8,10 @@ import {
 import type { CountryCode, PaymentStatus, ProviderTransaction } from '../domain/payments.js';
 import { providerMsisdn } from '../utils/msisdn.js';
 import type { PaymentProviderAdapter, ProviderContext } from './types.js';
-import { joinUrl, ProviderHttpError, responsePayload } from './http.js';
+import { joinUrl, providerFetch, ProviderHttpError, responsePayload } from './http.js';
+import { authorizedProviderFetch, credentialKey, parseToken, TokenCache } from './tokens.js';
 
-const tokenCache = new Map<string, { token: string; expiresAt: number }>();
+const tokenCache = new TokenCache();
 
 function statusFromPayload(payload: unknown): PaymentStatus {
   const root = payload as {
@@ -42,30 +45,25 @@ export class AirtelMoneyAdapter implements PaymentProviderAdapter {
     return Boolean(credentials.airtelBalancePath);
   }
 
-  private async token(country: CountryCode): Promise<string> {
-    const cache = tokenCache.get(country);
-    if (cache && cache.expiresAt > Date.now() + 60_000) return cache.token;
-
+  private async authorizedFetch(country: CountryCode, url: string, init: RequestInit = {}, operation: TransportScope['operation'] = 'status'): Promise<Response> {
     const credentials = getOperatorCredentials('airtel', country);
-    const response = await fetch(joinUrl(credentials.baseUrl, '/auth/oauth2/token'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: '*/*' },
-      body: JSON.stringify({
-        client_id: credentials.clientId,
-        client_secret: credentials.clientSecret,
-        grant_type: 'client_credentials',
-      }),
-    });
-    const payload = await responsePayload(response);
-    if (!response.ok) {
-      throw new ProviderHttpError('airtel', response.status, JSON.stringify(payload));
-    }
-
-    const data = payload as { access_token?: string; expires_in?: number };
-    if (!data.access_token) throw new Error('Airtel token response did not include access_token');
-    const expiresIn = Number(data.expires_in ?? 3600);
-    tokenCache.set(country, { token: data.access_token, expiresAt: Date.now() + expiresIn * 1000 });
-    return data.access_token;
+    const key = credentialKey(['airtel', country, credentials.baseUrl, credentials.mode, credentials.clientId, credentials.clientSecret]);
+    return authorizedProviderFetch(tokenCache, key, async () => {
+      const response = await providerFetch(joinUrl(credentials.baseUrl, '/auth/oauth2/token'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: '*/*' },
+        body: JSON.stringify({
+          client_id: credentials.clientId,
+          client_secret: credentials.clientSecret,
+          grant_type: 'client_credentials',
+        }),
+      }, { provider: 'airtel', country, operation: 'token' });
+      const payload = await responsePayload(response);
+      if (!response.ok) {
+        throw new ProviderHttpError('airtel', response.status, 'Token acquisition rejected');
+      }
+      return parseToken(payload);
+    }, url, init, { provider: 'airtel', country, operation });
   }
 
   async collect(
@@ -74,7 +72,6 @@ export class AirtelMoneyAdapter implements PaymentProviderAdapter {
     providerReference: string,
   ): Promise<ProviderTransaction> {
     const credentials = getOperatorCredentials('airtel', context.country);
-    const token = await this.token(context.country);
     const phone = providerMsisdn(input.phone, context.country, credentials.msisdnMode);
     const body = {
       reference: input.externalId,
@@ -91,19 +88,18 @@ export class AirtelMoneyAdapter implements PaymentProviderAdapter {
       },
     };
 
-    const response = await fetch(
+    const response = await this.authorizedFetch(context.country, 
       joinUrl(credentials.baseUrl, `/merchant/v${credentials.apiVersion}/payments/`),
       {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
           Accept: '*/*',
           'X-Country': context.country,
           'X-Currency': context.currency,
         },
         body: JSON.stringify(body),
-      },
+      }, 'collection',
     );
     const payload = await responsePayload(response);
     if (!response.ok) {
@@ -124,12 +120,10 @@ export class AirtelMoneyAdapter implements PaymentProviderAdapter {
     providerReference: string,
   ): Promise<{ status: PaymentStatus; raw?: unknown }> {
     const credentials = getOperatorCredentials('airtel', context.country);
-    const token = await this.token(context.country);
-    const response = await fetch(
+    const response = await this.authorizedFetch(context.country, 
       joinUrl(credentials.baseUrl, `/standard/v1/payments/${encodeURIComponent(providerReference)}`),
       {
         headers: {
-          Authorization: `Bearer ${token}`,
           Accept: '*/*',
           'X-Country': context.country,
           'X-Currency': context.currency,
@@ -145,26 +139,25 @@ export class AirtelMoneyAdapter implements PaymentProviderAdapter {
 
   async getBalance(
     context: ProviderContext,
+    account: 'collection' | 'disbursement' = 'collection',
   ): Promise<{ available: string; currency: string; raw?: unknown }> {
+    if (account !== 'collection') throw new Error('Airtel disbursement balance is not supported');
     const credentials = getOperatorCredentials('airtel', context.country);
     if (!credentials.airtelBalancePath) {
       throw new Error(`Airtel balance endpoint is not configured for ${context.country}`);
     }
-    const token = await this.token(context.country);
-    const response = await fetch(joinUrl(credentials.baseUrl, credentials.airtelBalancePath), {
+    const response = await this.authorizedFetch(context.country, joinUrl(credentials.baseUrl, credentials.airtelBalancePath), {
       headers: {
-        Authorization: `Bearer ${token}`,
         Accept: '*/*',
         'X-Country': context.country,
         'X-Currency': context.currency,
       },
-    });
+    }, 'balance');
     const payload = await responsePayload(response);
     if (!response.ok) throw new ProviderHttpError('airtel', response.status, JSON.stringify(payload));
-    const root = payload as { data?: { balance?: unknown }; balance?: unknown; currency?: unknown };
+    const root = payload as { data?: { balance?: unknown; currency?: unknown }; balance?: unknown; currency?: unknown };
     return {
-      available: String(root.data?.balance ?? root.balance ?? '0'),
-      currency: String(root.currency ?? context.currency),
+      ...validateBalance(root.data?.balance ?? root.balance, root.data?.currency ?? root.currency, context.currency),
       raw: payload,
     };
   }

@@ -1,3 +1,4 @@
+import { TukuPayError } from '../errors.js';
 import { timingSafeEqual } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 
@@ -114,3 +115,17 @@ export function requireScopes(...required: string[]) {
 }
 
 export const requireServiceAuth = requireScopes();
+
+export function canAccessProduct(identity: ServiceIdentity, product: string): boolean {
+  const code = product.trim().toLowerCase();
+  return /^[a-z0-9][a-z0-9_-]{0,63}$/.test(code) &&
+    (identity.scopes.includes('*') || identity.scopes.includes('products:*') ||
+      identity.scopes.includes('products:' + code) || identity.service.toLowerCase() === code);
+}
+
+export function requireProductAccess(request: FastifyRequest, product: string): void {
+  const identity = identifyService(request);
+  if (!identity || !canAccessProduct(identity, product)) {
+    throw new TukuPayError('Product access denied', 'PRODUCT_ACCESS_DENIED', 403);
+  }
+}

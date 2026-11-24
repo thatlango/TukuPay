@@ -1,3 +1,5 @@
+import { registerFinancialEventRoutes } from './routes/financial-events.js';
+import { configuredEnvironment, verifyBinding } from './config/financial-environment.js';
 import Fastify from 'fastify';
 import {
   isOperationConfigured,
@@ -22,14 +24,26 @@ import { ProviderRouter } from './services/provider-router.js';
 import { ReconciliationService, startReconciliationWorker } from './services/reconciliation.js';
 import { SettlementService } from './services/settlement-service.js';
 
-const app = Fastify({ logger: true, bodyLimit: 256 * 1024 });
+const financialEnvironment = configuredEnvironment();
+try {
+  const binding = await db.query<{environment:string}>('SELECT environment FROM financial_environment_binding');
+  verifyBinding(financialEnvironment,binding.rows);
+} catch (error) {
+  await db.end();
+  throw error;
+}
+
+const app = Fastify({
+  logger: { redact: ['req.headers.authorization','req.headers.cookie','req.headers["x-tuku-insights-key"]','res.headers["set-cookie"]','req.body','err.body','err.response','err.config'] },
+  disableRequestLogging: true,
+  bodyLimit: 256 * 1024,
+});
 
 const realAdapters = [new MtnMoMoAdapter(), new AirtelMoneyAdapter()];
 const adapters = simulatorEnabled()
   ? [
       new SimulatedProviderAdapter('mtn'),
       new SimulatedProviderAdapter('airtel'),
-      ...realAdapters,
     ]
   : realAdapters;
 
@@ -45,7 +59,7 @@ app.setErrorHandler((error, _request, reply) => {
     void reply.code(error.statusCode).send({ error: { code: error.code, message: error.message } });
     return;
   }
-  app.log.error({ err: error }, 'Unhandled TukuPay request error');
+  app.log.error({ event: 'request_failed' }, 'Unhandled TukuPay request error');
   void reply.code(500).send({
     error: { code: 'INTERNAL_ERROR', message: 'TukuPay could not complete the request' },
   });
@@ -56,6 +70,7 @@ app.get('/health', async () => ({
   status: 'ok',
   version: '0.3.0',
   simulator: simulatorEnabled(),
+  financialEnvironment,
 }));
 
 app.get('/v1/markets', async () => ({
@@ -78,6 +93,7 @@ app.get('/v1/markets', async () => ({
 }));
 
 await registerPaymentRoutes(app, payments);
+await registerFinancialEventRoutes(app);
 await registerPayoutRoutes(app, payouts);
 await registerWebhookRoutes(app, payments);
 await registerOpsRoutes(app, ops, settlements);

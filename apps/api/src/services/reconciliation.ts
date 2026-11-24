@@ -1,3 +1,5 @@
+import { reconciliationSettings } from '../config/reconciliation-settings.js';
+import { boundedInteger } from '../utils/request-validation.js';
 import type { PayoutService } from './payout-service.js';
 import type { PaymentService } from './payment-service.js';
 
@@ -14,7 +16,7 @@ export class ReconciliationService {
     paymentsChecked: number;
     payoutsChecked: number;
   }> {
-    const bounded = Math.max(1, Math.min(limit, 500));
+    const bounded = boundedInteger(limit,50,1,500);
     const [paymentIds, payoutIds] = await Promise.all([
       this.payments.pendingPaymentIds(bounded),
       this.payouts.pendingPayoutIds(bounded),
@@ -57,10 +59,8 @@ export function startReconciliationWorker(
   reconciler: ReconciliationService,
   logger: { info: (obj: unknown, message?: string) => void; error: (obj: unknown, message?: string) => void },
 ): () => void {
-  if ((process.env.RECONCILIATION_ENABLED ?? 'true').toLowerCase() === 'false') return () => undefined;
-
-  const intervalMs = Math.max(5_000, Number(process.env.RECONCILIATION_INTERVAL_MS ?? 15_000));
-  const batchSize = Math.max(1, Number(process.env.RECONCILIATION_BATCH_SIZE ?? 50));
+  const { enabled, intervalMs, batchSize } = reconciliationSettings();
+  if (!enabled) return () => undefined;
   let running = false;
 
   const tick = async (): Promise<void> => {
@@ -70,7 +70,7 @@ export function startReconciliationWorker(
       const result = await reconciler.runBatch(batchSize);
       if (result.checked > 0) logger.info(result, 'TukuPay reconciliation batch completed');
     } catch (error) {
-      logger.error({ err: error }, 'TukuPay reconciliation batch failed');
+      logger.error({ event: 'reconciliation_failed' }, 'TukuPay reconciliation batch failed');
     } finally {
       running = false;
     }

@@ -1,10 +1,14 @@
+import { requireCallbackMode, validProviderReference } from '../providers/webhook-policy.js';
+import { assertSameIntent } from './idempotency.js';
+import type { PoolClient } from 'pg';
 import { createHash, randomUUID } from 'node:crypto';
 import { getMarket } from '../config/markets.js';
-import { providerRuntimeMode, providerTransactionCurrency, providerUsesOperatorSandbox } from '../config/provider-credentials.js';
+import { providerRuntimeMode, providerTransactionCurrency, providerUsesOperatorSandbox, simulatorEnabled } from '../config/provider-credentials.js';
 import { db } from '../db/pool.js';
 import type { CreatePaymentInput, PaymentStatus, ProviderCode } from '../domain/payments.js';
 import { TukuPayError } from '../errors.js';
 import { ProviderHttpError } from '../providers/http.js';
+import { assertSuccessfulSettlement } from '../providers/settlement-validation.js';
 import { majorToMinor, minorToMajor } from '../utils/money.js';
 import { normalizeMsisdn, normalizeSandboxMsisdn } from '../utils/msisdn.js';
 import { ProviderRouter } from './provider-router.js';
@@ -117,9 +121,12 @@ export class PaymentService {
         WHERE product_code = $1
           AND (external_id = $2 OR ($3::text IS NOT NULL AND idempotency_key = $3))
         ORDER BY created_at DESC
-        LIMIT 1`,
+        LIMIT 2`,
       [product, externalId, idempotencyKey ?? null],
     );
+    if (result.rows.length > 1) {
+      throw new TukuPayError('External ID and idempotency key identify different requests', 'IDEMPOTENCY_CONFLICT', 409);
+    }
     return result.rows[0] ? this.getById(result.rows[0].id) : null;
   }
 
@@ -148,14 +155,15 @@ export class PaymentService {
       );
     }
 
-    const existing = await this.findExisting(product, externalId, idempotencyKey);
-    if (existing) return existing;
-
     const amountMinor = majorToMinor(amount, currency);
     const rawPhone = text(input.phone, 'phone');
     const phone = operatorSandbox
       ? normalizeSandboxMsisdn(rawPhone)
       : normalizeMsisdn(rawPhone, country);
+    const intent = { product, externalId, country, provider: adapter.provider, amount, currency, phone,
+      description: input.description ?? null, metadata: input.metadata ?? {} };
+    const existing = await this.findExisting(product, externalId, idempotencyKey);
+    if (existing) return assertSameIntent(existing, intent);
     const providerMarket = await db.query<{ id: string }>(
       `SELECT id
          FROM provider_markets
@@ -222,24 +230,30 @@ export class PaymentService {
       const pgCode = (error as { code?: string }).code;
       if (pgCode === '23505') {
         const raced = await this.findExisting(product, externalId, idempotencyKey);
-        if (raced) return raced;
+        if (raced) return assertSameIntent(raced, intent);
       }
       throw error;
     } finally {
       client.release();
     }
 
+    // Mark the durable reservation before the provider call. No replay on ambiguity.
+    const claim = await db.query(
+      "UPDATE financial_dispatch_records SET phase='ATTEMPTING', attempted_at=now() WHERE kind=$1 AND transaction_id=$2 AND provider_reference=$3 AND phase='RESERVED' RETURNING id",
+      ['collection', paymentId, providerReference],
+    );
+    if (claim.rowCount !== 1) return this.getById(paymentId);
     try {
       const transaction = await adapter.collect(
         { country, currency },
         normalizedInput,
         providerReference,
       );
-      await this.applyStatus(paymentId, providerReference, transaction.status, transaction.raw, null);
+      await this.applyStatus(paymentId, providerReference, transaction.status === 'SUCCESSFUL' ? 'PENDING' : transaction.status, transaction.raw, null);
     } catch (error) {
       const retryable = !(error instanceof ProviderHttpError) || error.retryable;
       const status: PaymentStatus = retryable ? 'PENDING' : 'FAILED';
-      const message = error instanceof Error ? error.message : 'Unknown provider error';
+      const message = 'Provider request failed; review transport telemetry';
       await this.applyStatus(paymentId, providerReference, status, null, message);
       if (!retryable) {
         throw new TukuPayError(
@@ -282,9 +296,11 @@ export class PaymentService {
       provider_code: ProviderCode;
       country_code: string;
       currency: string;
+      amount_minor: string;
+      external_id: string;
       normalized_status: PaymentStatus;
     }>(
-      `SELECT pt.provider_reference, pm.provider_code, pi.country_code, pi.currency,
+      `SELECT pt.provider_reference, pm.provider_code, pi.country_code, pi.currency, pi.amount_minor::text, pi.external_id,
               pt.normalized_status
          FROM provider_transactions pt
          JOIN payment_intents pi ON pi.id = pt.payment_intent_id
@@ -302,7 +318,31 @@ export class PaymentService {
     const status = await adapter.getStatus(
       { country: transaction.country_code, currency: transaction.currency },
       transaction.provider_reference,
-    );
+    ).catch(async (error: unknown) => {
+      await db.query(
+        `UPDATE provider_transactions SET last_checked_at=now(), attempts=attempts+1,
+          last_error='Provider status request failed', updated_at=now()
+          WHERE payment_intent_id=$1 AND provider_reference=$2 AND normalized_status IN ('CREATED','PENDING')`,
+        [id, transaction.provider_reference],
+      );
+      throw error;
+    });
+    if (status.status === 'SUCCESSFUL') {
+      try {
+        assertSuccessfulSettlement(status.raw, {
+          provider: transaction.provider_code,
+          reference: transaction.provider_reference,
+          externalId: transaction.external_id,
+          amount: minorToMajor(transaction.amount_minor, transaction.currency),
+          currency: transaction.currency,
+          simulator: simulatorEnabled(),
+        });
+      } catch (error) {
+        await this.applyStatus(id, transaction.provider_reference, 'PENDING', status.raw,
+          'Settlement evidence verification failed');
+        throw new TukuPayError('Provider settlement could not be verified', 'SETTLEMENT_UNVERIFIED', 502);
+      }
+    }
     await this.applyStatus(id, transaction.provider_reference, status.status, status.raw, null);
     return this.getById(id);
   }
@@ -329,11 +369,14 @@ export class PaymentService {
 
   async pendingPaymentIds(limit: number): Promise<string[]> {
     const result = await db.query<{ payment_intent_id: string }>(
-      `SELECT DISTINCT pt.payment_intent_id
+      `SELECT pt.payment_intent_id
          FROM provider_transactions pt
         WHERE pt.normalized_status IN ('CREATED','PENDING')
-          AND (pt.last_checked_at IS NULL OR pt.last_checked_at < now() - interval '5 seconds')
-        ORDER BY pt.payment_intent_id
+          AND (pt.last_checked_at IS NULL OR pt.last_checked_at < now() -
+            CASE WHEN pt.last_error IS NULL THEN interval '5 seconds'
+                 ELSE interval '5 seconds' * LEAST(60, POWER(2, LEAST(pt.attempts, 6))) END)
+        GROUP BY pt.payment_intent_id
+        ORDER BY MIN(pt.last_checked_at) NULLS FIRST, pt.payment_intent_id
         LIMIT $1`,
       [limit],
     );
@@ -345,10 +388,11 @@ export class PaymentService {
     country: string,
     reference: string | undefined,
     payload: unknown,
-    signature?: string,
+    _signature?: string,
   ): Promise<{ eventId: string | null; reference: string | undefined }> {
     const normalizedCountry = country.toUpperCase();
     const runtimeMode = providerRuntimeMode(provider, normalizedCountry);
+    requireCallbackMode(provider, normalizedCountry, runtimeMode);
     const market = await db.query<{ id: string }>(
       `SELECT id FROM provider_markets
         WHERE provider_code = $1 AND country_code = $2 AND environment = $3 AND enabled = TRUE
@@ -361,7 +405,18 @@ export class PaymentService {
     }
 
     const resolvedReference = reference || extractReference(payload);
-    const payloadText = safePayload(payload);
+    if (!resolvedReference || !validProviderReference(resolvedReference)) {
+      throw new TukuPayError('Invalid callback reference', 'CALLBACK_REFERENCE_INVALID', 400);
+    }
+    // Ignore unsolicited references; never persist arbitrary callback payloads.
+    const known = await db.query(
+      `SELECT 1 FROM provider_transactions
+         WHERE provider_market_id=$1 AND provider_reference=$2
+           AND normalized_status IN ('CREATED','PENDING') LIMIT 1`,
+      [providerMarketId, resolvedReference],
+    );
+    if (!known.rowCount) return { eventId: null, reference: resolvedReference };
+    const payloadText = safePayload({ reference: resolvedReference, kind: 'wake-up' });
     const eventKey = createHash('sha256')
       .update(`${provider}:${normalizedCountry}:${resolvedReference ?? ''}:${payloadText}`)
       .digest('hex');
@@ -371,7 +426,7 @@ export class PaymentService {
        VALUES ($1,$2,$3::jsonb,$4)
        ON CONFLICT (provider_market_id, event_key) WHERE event_key IS NOT NULL DO NOTHING
        RETURNING id`,
-      [providerMarketId, eventKey, payloadText, signature ?? null],
+      [providerMarketId, eventKey, payloadText, null],
     );
     return { eventId: inserted.rows[0]?.id ?? null, reference: resolvedReference };
   }
@@ -392,7 +447,7 @@ export class PaymentService {
       if (eventId) {
         await db.query(
           'UPDATE webhook_events SET processed_at = now(), processing_error = $2 WHERE id = $1',
-          [eventId, error instanceof Error ? error.message : 'Unknown webhook processing error'],
+          [eventId, 'Webhook processing failed'],
         );
       }
       throw error;
@@ -428,6 +483,13 @@ export class PaymentService {
           WHERE id = $1`,
         [paymentId, status],
       );
+      if (status === 'SUCCESSFUL') await this.ensureCollectionLedger(client, paymentId);
+      if (responsePayload !== null && responsePayload !== undefined) {
+        await client.query(
+          "UPDATE financial_dispatch_records SET phase='OBSERVED', observed_at=now() WHERE kind=$1 AND transaction_id=$2 AND provider_reference=$3 AND phase='ATTEMPTING'",
+          ['collection', paymentId, providerReference],
+        );
+      }
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');
@@ -436,11 +498,10 @@ export class PaymentService {
       client.release();
     }
 
-    if (status === 'SUCCESSFUL') await this.ensureCollectionLedger(paymentId);
   }
 
-  private async ensureCollectionLedger(paymentId: string): Promise<void> {
-    const result = await db.query<{
+  private async ensureCollectionLedger(client: PoolClient, paymentId: string): Promise<void> {
+    const result = await client.query<{
       amount_minor: string;
       currency: string;
       country_code: string;
@@ -459,10 +520,7 @@ export class PaymentService {
     const payment = result.rows[0];
     if (!payment) return;
 
-    const client = await db.connect();
-    try {
-      await client.query('BEGIN');
-      const journal = await client.query<{ id: string }>(
+    const journal = await client.query<{ id: string }>(
         `INSERT INTO journal_entries
           (reference_type, reference_id, country_code, currency, description)
          VALUES ('PAYMENT_COLLECTION',$1,$2,$3,$4)
@@ -471,10 +529,7 @@ export class PaymentService {
         [paymentId, payment.country_code, payment.currency, `Collection for ${payment.product_code}`],
       );
       const journalId = journal.rows[0]?.id;
-      if (!journalId) {
-        await client.query('COMMIT');
-        return;
-      }
+      if (!journalId) return;
 
       const assetCode = `${payment.provider_code.toUpperCase()}:${payment.country_code}:${payment.currency}:CLEARING`;
       const liabilityCode = `PRODUCT:${payment.product_code.toUpperCase()}:${payment.country_code}:${payment.currency}:CUSTOMER_FUNDS`;
@@ -497,12 +552,5 @@ export class PaymentService {
          VALUES ($1,$2,'DEBIT',$4), ($1,$3,'CREDIT',$4)`,
         [journalId, asset.rows[0]!.id, liability.rows[0]!.id, payment.amount_minor],
       );
-      await client.query('COMMIT');
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
   }
 }
