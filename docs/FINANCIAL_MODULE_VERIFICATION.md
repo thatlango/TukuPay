@@ -38,3 +38,13 @@ The following files were reproduced in an isolated temporary directory and Git b
 Python targeted test_treasury_risk: 5 passed, zero failures. The imported intelligence.py utility functions were reproduced from the current source excerpt, not the complete blob. This is an isolated component test, not full package verification.
 Node --test intelligence-report.test.mjs: 2 passed, zero failures.
 Not executed: full Python suite/CLI, actual report file load or workspace browser test, Rust compilation and journal audit, database export, SDK/API typecheck, simulator/PyMoMo, benchmark or production verification. No operator/database connection or financial write made. CI and local scripts extended to cover the new fixtures and dashboard checks.
+
+## Environment and balance checks — follow-up
+Source commit fe813a84737672c86a2b659b3f43b2c05ea12250. Local Node 22.16.0, TypeScript transpileModule to ES2022. Six reproduced source files matched Git blob hashes:
+- financial-environment.ts 311648a81ca7db2767472afb4ac4c09bbabcca1e
+- financial-environment.test.ts f1dbce4af092a5c9d5e9502cc43a7e9e941eb447
+- balance-validation.ts affabb8287d883df3d9d3e216e938acd9c8f0782
+- balance-validation.test.ts 67888cdab788ebfbb11e4933c58c63d2c63da89f
+- money.ts 7274b20ab36028c5fd3e26872b72dd3e2fc6a6e9
+- errors.ts bc96773dc3fb8a096c6203ce4e506b10e78b30b5
+Executed node --test on both targeted test files: four passed, zero failures (72.6 ms total reported). No actual PostgreSQL connection, migration, API startup, operator calls or full TypeScript typecheck. GitHub DNS unavailable; cargo, pnpm, docker and psql missing. New batch tests are not yet executed. Hosted CI failure run 45369200320 had no step details; cause unconfirmed.

@@ -78,3 +78,12 @@ The local operations workspace optionally reads a private JSON report at TUKUPAY
 
 ## Controlled integration decision
 The runtime cutover is not implemented: Rust remains offline; Python is read-only. One authoritative ledger writer remains TypeScript/PostgreSQL. Before a proposal to enable Rust in the transaction path, obtain green full CI or equivalent local verification, reviewed policy differences, representative performance evidence, environment separation and finance-approved journal rules. Test rollback and fail-closed behavior in simulator. Do not introduce a second transaction writer. This is a gated future release decision, not an automatic switch.
+
+### Repeatable statement processing
+A local batch command accepts up to 20 explicit independent normalized statement files, rejects identical file hashes, preserves duplicate references across files for reconciliation and publishes a private report without overwriting prior evidence. Example (from repository root):
+```sh
+mkdir -p financial-snapshots
+chmod 700 financial-snapshots
+python3 python/intelligence/run_batch.py python/intelligence/fixtures/sample.json --statement python/intelligence/fixtures/statement.csv --output financial-snapshots/fixture-review.json
+```
+The command has no network access or scheduling. Use --complete-statements only after review of independent source coverage. Raw operator statement retrieval and native statement mapping still require provider-specific contracts. The API now rejects missing balance fields rather than recording a default zero. The snapshot exporter requires a matching bound database and includes captured balances; obligations and expected settlement fees remain manually reviewed inputs. See FINANCIAL_ENVIRONMENT_ISOLATION.md.
