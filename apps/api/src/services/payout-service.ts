@@ -25,6 +25,7 @@ type PayoutRow = {
   description: string | null;
   status: PayoutStatus;
   metadata: Record<string, unknown>;
+  requested_by: string | null;
   approved_by: string | null;
   approved_at: Date | null;
   provider_reference: string | null;
@@ -48,6 +49,7 @@ export type PayoutView = {
   status: PayoutStatus;
   providerStatus: string | null;
   lastError: string | null;
+  requestedBy: string | null;
   approvedBy: string | null;
   approvedAt: Date | null;
   metadata: Record<string, unknown>;
@@ -87,6 +89,7 @@ export class PayoutService {
       status: row.status,
       providerStatus: row.provider_status,
       lastError: row.last_error,
+      requestedBy: row.requested_by,
       approvedBy: row.approved_by,
       approvedAt: row.approved_at,
       metadata: row.metadata,
@@ -99,7 +102,7 @@ export class PayoutService {
     const result = await db.query<PayoutRow>(
       `SELECT pr.id, pr.product_code, pr.external_id, pr.country_code, pr.provider_code,
               pr.amount_minor::text, pr.currency, pr.phone_e164, pr.description,
-              pr.status, pr.metadata, pr.approved_by, pr.approved_at,
+              pr.status, pr.metadata, pr.requested_by, pr.approved_by, pr.approved_at,
               ppt.provider_reference, ppt.provider_status, ppt.last_error,
               pr.created_at, pr.updated_at
          FROM payout_requests pr
@@ -134,7 +137,8 @@ export class PayoutService {
     return result.rows[0] ? this.getById(result.rows[0].id) : null;
   }
 
-  async create(input: CreatePayoutInput, idempotencyKey?: string): Promise<PayoutView> {
+  async create(input: CreatePayoutInput, idempotencyKey?: string, requester?: string): Promise<PayoutView> {
+    const requestedBy = required(requester, 'requester').toLowerCase();
     const product = required(input.product, 'product').toLowerCase();
     const externalId = required(input.externalId, 'externalId');
     const country = required(input.country, 'country').toUpperCase();
@@ -172,12 +176,12 @@ export class PayoutService {
       await db.query(
         `INSERT INTO payout_requests
           (id, product_code, external_id, country_code, provider_code, amount_minor,
-           currency, phone_e164, description, status, metadata, idempotency_key)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'APPROVAL_REQUIRED',$10::jsonb,$11)`,
+           currency, phone_e164, description, status, metadata, idempotency_key, requested_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'APPROVAL_REQUIRED',$10::jsonb,$11,$12)`,
         [
           id, product, externalId, country, adapter.provider, amountMinor.toString(),
           currency, phone, input.description ?? null,
-          JSON.stringify(input.metadata ?? {}), idempotencyKey ?? null,
+          JSON.stringify(input.metadata ?? {}), idempotencyKey ?? null, requestedBy,
         ],
       );
     } catch (error) {
@@ -194,8 +198,8 @@ export class PayoutService {
     const client = await db.connect();
     try {
       await client.query('BEGIN');
-      const current = await client.query<{ status: PayoutStatus }>(
-        'SELECT status FROM payout_requests WHERE id = $1 FOR UPDATE',
+      const current = await client.query<{ status: PayoutStatus; requested_by: string | null; approved_by: string | null }>(
+        'SELECT status, requested_by, approved_by FROM payout_requests WHERE id = $1 FOR UPDATE',
         [id],
       );
       const row = current.rows[0];
@@ -212,6 +216,12 @@ export class PayoutService {
         );
       }
 
+      if (!row.requested_by || row.requested_by.toLowerCase() === actor.toLowerCase()) {
+        throw new TukuPayError('A recorded requester and independent approver are required', 'PAYOUT_APPROVER_CONFLICT', 403);
+      }
+      if (row.status === 'APPROVED' && row.approved_by !== actor) {
+        throw new TukuPayError('Only the recorded approver may resume approval', 'PAYOUT_APPROVER_CONFLICT', 403);
+      }
       if (row.status === 'APPROVAL_REQUIRED') {
       await client.query(
         `UPDATE payout_requests

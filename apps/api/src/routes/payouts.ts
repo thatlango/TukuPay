@@ -54,7 +54,7 @@ export async function registerPayoutRoutes(
     const key = Array.isArray(header) ? header[0] : header;
     const input = parse(request.body);
     requireProductAccess(request, input.product);
-    const payout = await payouts.create(input, key);
+    const payout = await payouts.create(input, key, identifyService(request)?.service);
     return reply.code(201).send({ payout });
   });
 

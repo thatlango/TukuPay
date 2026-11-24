@@ -27,7 +27,8 @@ random_value() { node -e 'process.stdout.write(require("node:crypto").randomByte
 db_password="$(random_value)"
 admin="$(random_value)"
 product="$(random_value)"
-registry="$(node -e 'process.stdout.write(JSON.stringify({kela:{token:process.argv[1],scopes:["payments:create","payments:read","payments:refresh"]}}))' "$product")"
+approver="$(random_value)"
+registry="$(node -e 'process.stdout.write(JSON.stringify({kela:{token:process.argv[1],scopes:["payments:create","payments:read","payments:refresh"]},finance:{token:process.argv[2],scopes:["payouts:approve","products:kela"]}}))' "$product" "$approver")"
 echo "Typecheck, unit tests, and build"
 env -i PATH="$PATH" HOME="$HOME" pnpm typecheck
 env -i PATH="$PATH" HOME="$HOME" pnpm test
@@ -65,7 +66,7 @@ for _ in $(seq 1 40); do
 done
 [[ "$ready" == true ]] || { cat "$run_dir/api.log"; exit 1; }
 env -i PATH="$PATH" HOME="$HOME" TUKUPAY_E2E_URL="http://127.0.0.1:$api_port" \
-  TUKUPAY_SERVICE_TOKEN="$admin" TUKUPAY_E2E_KELA_TOKEN="$product" node apps/api/scripts/e2e-simulator.mjs
+  TUKUPAY_SERVICE_TOKEN="$admin" TUKUPAY_E2E_KELA_TOKEN="$product" TUKUPAY_E2E_APPROVER_TOKEN="$approver" node apps/api/scripts/e2e-simulator.mjs
 docker exec -i "$db_id" psql -X -qAt -v ON_ERROR_STOP=1 -U tukupay -d tukupay \
   < database/checks/payment_integrity.sql > "$run_dir/integrity.txt"
 if [[ -s "$run_dir/integrity.txt" ]]; then cat "$run_dir/integrity.txt"; exit 1; fi

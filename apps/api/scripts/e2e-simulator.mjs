@@ -1,5 +1,7 @@
 const base = process.env.TUKUPAY_E2E_URL ?? 'http://127.0.0.1:8080';
 const admin = process.env.TUKUPAY_SERVICE_TOKEN ?? 'ci-admin-token-0123456789';
+const approver = process.env.TUKUPAY_E2E_APPROVER_TOKEN;
+if (!approver) throw new Error('Independent simulator approver credential is required');
 const kela = process.env.TUKUPAY_E2E_KELA_TOKEN ?? 'ci-kela-token-0123456789';
 
 async function call(method, path, token, body, idempotencyKey) {
@@ -101,12 +103,13 @@ const payoutId = result.payload.payout.id;
 assert(!result.payload.payout.providerReference, 'unapproved payout must not be dispatched');
 const payoutConflict = await call('POST', '/v1/payouts', admin, { ...payoutBody, money: { amount: '2600', currency: 'UGX' } }, `payout-${stamp}`);
 assert(payoutConflict.response.status === 409, 'changed payout amount must be rejected');
-const approvals = await Promise.all([0, 1].map(() => call('POST', `/v1/payouts/${payoutId}/approve`, admin, { reason: 'Simulator test only' })));
+assert((await call('POST', `/v1/payouts/${payoutId}/approve`, admin)).response.status === 403, 'requester cannot approve own payout');
+const approvals = await Promise.all([0, 1].map(() => call('POST', `/v1/payouts/${payoutId}/approve`, approver, { reason: 'Simulator test only' })));
 assert(approvals.every(a => a.response.ok), 'concurrent approvals must be idempotent');
 result = await call('GET', `/v1/payouts/${payoutId}`, admin);
 assert(result.response.ok && result.payload.payout.status === 'PENDING', 'approved payout should be pending');
 const payoutRef = result.payload.payout.providerReference;
-result = await call('POST', `/v1/payouts/${payoutId}/approve`, admin);
+result = await call('POST', `/v1/payouts/${payoutId}/approve`, approver);
 assert(result.payload.payout.providerReference === payoutRef, 'repeat approval must not dispatch again');
 result = await call('POST', `/v1/payouts/${payoutId}/refresh`, admin);
 assert(result.payload.payout.status === 'SUCCESSFUL', 'approved payout should reconcile');

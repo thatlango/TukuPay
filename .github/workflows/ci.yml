@@ -41,6 +41,9 @@ jobs:
       - run: pnpm test
       - run: pnpm db:migrate
       - run: pnpm build
+      - name: Configure independent simulator approver
+        run: |
+          node -e 'const fs=require("node:fs");const value=require("node:crypto").randomBytes(24).toString("hex");const registry=JSON.parse(process.env.TUKUPAY_SERVICE_TOKENS_JSON);registry.finance={token:value,scopes:["payouts:approve","products:kela"]};fs.appendFileSync(process.env.GITHUB_ENV,"TUKUPAY_E2E_APPROVER_TOKEN="+value+"\nTUKUPAY_SERVICE_TOKENS_JSON="+JSON.stringify(registry)+"\n")'
       - name: Start API
         run: |
           pnpm --filter @tuku/pay-api start > /tmp/tukupay-api.log 2>&1 &
