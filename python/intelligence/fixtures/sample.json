@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "as_of": "2026-11-24T00:00:00Z",
+  "window_start": "2026-11-10T00:00:00Z",
+  "complete_daily_history": false,
+  "transactions": [
+    {
+      "reference": "fixture-001",
+      "country": "UG",
+      "provider": "mtn",
+      "currency": "UGX",
+      "environment": "simulator",
+      "kind": "collection",
+      "status": "SUCCESSFUL",
+      "amount_minor": "1500",
+      "timestamp": "2026-11-23T12:00:00Z"
+    }
+  ],
+  "statements": [
+    {
+      "reference": "fixture-001",
+      "country": "UG",
+      "provider": "mtn",
+      "currency": "UGX",
+      "environment": "simulator",
+      "kind": "collection",
+      "status": "SUCCESSFUL",
+      "amount_minor": "1500",
+      "timestamp": "2026-11-23T12:01:00Z"
+    }
+  ]
+}
