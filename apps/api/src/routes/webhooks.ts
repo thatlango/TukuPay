@@ -31,7 +31,7 @@ export async function registerWebhookRoutes(
       signature(request),
     );
 
-    setImmediate(() => {
+    if (event.eventId) setImmediate(() => {
       void payments.processWebhook(event.eventId, rail, country, event.reference)
         .catch((error) => request.log.error({ err: error }, 'Webhook verification failed'));
     });
@@ -39,6 +39,6 @@ export async function registerWebhookRoutes(
     return reply.code(202).send({ accepted: true });
   };
 
-  app.route({ method: ['POST', 'PUT'], url: '/webhooks/:provider/:country/:reference', handler });
-  app.route({ method: ['POST', 'PUT'], url: '/webhooks/:provider/:country', handler });
+  app.route({ method: ['POST', 'PUT'], url: '/webhooks/:provider/:country/:reference', bodyLimit: 1_048_576, handler });
+  app.route({ method: ['POST', 'PUT'], url: '/webhooks/:provider/:country', bodyLimit: 1_048_576, handler });
 }

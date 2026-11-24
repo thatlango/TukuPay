@@ -67,9 +67,33 @@ assert(forbidden.response.status === 403, 'collection-only credential must be de
 result = await call('GET', '/v1/ops/summary', admin);
 assert(result.response.ok && result.payload.ops.simulator === true, 'ops summary should report simulator mode');
 
+
+const timeoutBody = { ...paymentBody, externalId: `E2E-TIMEOUT-${stamp}`, metadata: { simulatorScenario: 'timeout_then_success' } };
+result = await call('POST', '/v1/payments', kela, timeoutBody, `timeout-${stamp}`);
+assert(result.response.status === 202 && result.payload.payment.status === 'PENDING', 'ambiguous write must remain pending');
+const timeoutId = result.payload.payment.id;
+const timeoutRef = result.payload.payment.providerReference;
+result = await call('POST', '/v1/payments', kela, timeoutBody, `timeout-${stamp}`);
+assert(result.payload.payment.id === timeoutId && result.payload.payment.providerReference === timeoutRef, 'retry must reuse original payment and provider reference');
+for (let i = 0; i < 2; i++) result = await call('POST', `/v1/payments/${timeoutId}/refresh`, kela);
+assert(result.payload.payment.status === 'SUCCESSFUL', 'ambiguous write must reconcile');
+
+const payoutBody = { ...paymentBody, externalId: `E2E-PAYOUT-${stamp}` };
+result = await call('POST', '/v1/payouts', admin, payoutBody, `payout-${stamp}`);
+assert(result.response.status === 201 && result.payload.payout.status === 'APPROVAL_REQUIRED', 'payout must require approval');
+const payoutId = result.payload.payout.id;
+assert(!result.payload.payout.providerReference, 'unapproved payout must not be dispatched');
+result = await call('POST', `/v1/payouts/${payoutId}/approve`, admin, { reason: 'Simulator test only' });
+assert(result.response.ok && result.payload.payout.status === 'PENDING', 'approved payout should be pending');
+const payoutRef = result.payload.payout.providerReference;
+result = await call('POST', `/v1/payouts/${payoutId}/approve`, admin);
+assert(result.payload.payout.providerReference === payoutRef, 'repeat approval must not dispatch again');
+result = await call('POST', `/v1/payouts/${payoutId}/refresh`, admin);
+assert(result.payload.payout.status === 'SUCCESSFUL', 'approved payout should reconcile');
+
 console.log(JSON.stringify({
   ok: true,
   paymentId,
   delayedId,
-  checks: ['scoped-auth', 'idempotency', 'collection-success', 'delayed-reconciliation', 'payout-scope-denial', 'ops-summary'],
+  checks: ['scoped-auth', 'idempotency', 'collection-success', 'delayed-reconciliation', 'payout-scope-denial', 'ops-summary', 'ambiguous-write-reconciliation', 'payout-approval-and-idempotency'],
 }));

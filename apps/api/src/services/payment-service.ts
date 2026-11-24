@@ -1,3 +1,4 @@
+import type { PoolClient } from 'pg';
 import { createHash, randomUUID } from 'node:crypto';
 import { getMarket } from '../config/markets.js';
 import { providerRuntimeMode, providerTransactionCurrency, providerUsesOperatorSandbox } from '../config/provider-credentials.js';
@@ -428,6 +429,7 @@ export class PaymentService {
           WHERE id = $1`,
         [paymentId, status],
       );
+      if (status === 'SUCCESSFUL') await this.ensureCollectionLedger(client, paymentId);
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');
@@ -436,11 +438,10 @@ export class PaymentService {
       client.release();
     }
 
-    if (status === 'SUCCESSFUL') await this.ensureCollectionLedger(paymentId);
   }
 
-  private async ensureCollectionLedger(paymentId: string): Promise<void> {
-    const result = await db.query<{
+  private async ensureCollectionLedger(client: PoolClient, paymentId: string): Promise<void> {
+    const result = await client.query<{
       amount_minor: string;
       currency: string;
       country_code: string;
@@ -459,10 +460,7 @@ export class PaymentService {
     const payment = result.rows[0];
     if (!payment) return;
 
-    const client = await db.connect();
-    try {
-      await client.query('BEGIN');
-      const journal = await client.query<{ id: string }>(
+    const journal = await client.query<{ id: string }>(
         `INSERT INTO journal_entries
           (reference_type, reference_id, country_code, currency, description)
          VALUES ('PAYMENT_COLLECTION',$1,$2,$3,$4)
@@ -471,10 +469,7 @@ export class PaymentService {
         [paymentId, payment.country_code, payment.currency, `Collection for ${payment.product_code}`],
       );
       const journalId = journal.rows[0]?.id;
-      if (!journalId) {
-        await client.query('COMMIT');
-        return;
-      }
+      if (!journalId) return;
 
       const assetCode = `${payment.provider_code.toUpperCase()}:${payment.country_code}:${payment.currency}:CLEARING`;
       const liabilityCode = `PRODUCT:${payment.product_code.toUpperCase()}:${payment.country_code}:${payment.currency}:CUSTOMER_FUNDS`;
@@ -497,12 +492,5 @@ export class PaymentService {
          VALUES ($1,$2,'DEBIT',$4), ($1,$3,'CREDIT',$4)`,
         [journalId, asset.rows[0]!.id, liability.rows[0]!.id, payment.amount_minor],
       );
-      await client.query('COMMIT');
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
   }
 }
