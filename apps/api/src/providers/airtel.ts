@@ -139,7 +139,9 @@ export class AirtelMoneyAdapter implements PaymentProviderAdapter {
 
   async getBalance(
     context: ProviderContext,
+    account: 'collection' | 'disbursement' = 'collection',
   ): Promise<{ available: string; currency: string; raw?: unknown }> {
+    if (account !== 'collection') throw new Error('Airtel disbursement balance is not supported');
     const credentials = getOperatorCredentials('airtel', context.country);
     if (!credentials.airtelBalancePath) {
       throw new Error(`Airtel balance endpoint is not configured for ${context.country}`);
