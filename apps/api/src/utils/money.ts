@@ -62,12 +62,17 @@ export function majorToMinor(amount: string, currency: string): bigint {
 }
 
 export function minorToMajor(minorValue: string | bigint, currency: string): string {
+  if (typeof minorValue === 'string' && !/^-?(?:0|[1-9]\d*)$/.test(minorValue)) {
+    throw new TukuPayError('Invalid minor-unit amount', 'INVALID_AMOUNT', 400);
+  }
   const minor = typeof minorValue === 'bigint' ? minorValue : BigInt(minorValue);
   const exponent = currencyExponent(currency);
   if (exponent === 0) return minor.toString();
 
+  const sign = minor < 0n ? '-' : '';
+  const absolute = minor < 0n ? -minor : minor;
   const scale = 10n ** BigInt(exponent);
-  const whole = minor / scale;
-  const fraction = (minor % scale).toString().padStart(exponent, '0').replace(/0+$/, '');
-  return fraction ? `${whole}.${fraction}` : whole.toString();
+  const whole = absolute / scale;
+  const fraction = (absolute % scale).toString().padStart(exponent, '0').replace(/0+$/, '');
+  return sign + (fraction ? `${whole}.${fraction}` : whole.toString());
 }

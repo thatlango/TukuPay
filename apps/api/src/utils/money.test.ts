@@ -21,3 +21,13 @@ test('currency policy rejects unlisted currencies and amounts beyond signed BIGI
   assert.equal(majorToMinor('1.20', 'EUR'), 120n);
   assert.equal(majorToMinor('0.01', 'USD'), 1n);
 });
+
+test('signed formatting preserves exact amount and zero', () => {
+  assert.equal(minorToMajor('-1','KES'),'-0.01');
+  assert.equal(minorToMajor('-101','KES'),'-1.01');
+  assert.equal(minorToMajor(-120n,'USD'),'-1.2');
+  assert.equal(minorToMajor('0','EUR'),'0');
+  assert.equal(minorToMajor('-1000','UGX'),'-1000');
+  assert.equal(minorToMajor(9223372036854775808n,'KES'),'92233720368547758.08');
+  for (const value of ['', ' 1', '0x10', '1e2', '1.0', '+1', '01']) assert.throws(()=>minorToMajor(value,'KES'));
+});
